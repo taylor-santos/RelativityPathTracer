@@ -112,54 +112,23 @@ float3 trace(__constant Sphere* spheres, const Ray* camray, const int sphere_cou
 	float3 accum_color = (float3)(0.0f, 0.0f, 0.0f);
 	float3 mask = (float3)(1.0f, 1.0f, 1.0f);
 
-	for (int bounces = 0; bounces < 8; bounces++){
+	float t;   /* distance to intersection */
+	int hitsphere_id = 0; /* index of intersected sphere */
 
-		float t;   /* distance to intersection */
-		int hitsphere_id = 0; /* index of intersected sphere */
+	/* if ray misses scene, return background colour */
+	if (!intersect_scene(spheres, &ray, &t, &hitsphere_id, sphere_count))
+		return accum_color += mask * (float3)(0.15f, 0.15f, 0.25f);
 
-		/* if ray misses scene, return background colour */
-		if (!intersect_scene(spheres, &ray, &t, &hitsphere_id, sphere_count))
-			return accum_color += mask * (float3)(0.15f, 0.15f, 0.25f);
-
-		/* else, we've got a hit! Fetch the closest hit sphere */
-		Sphere hitsphere = spheres[hitsphere_id]; /* version with local copy of sphere */
+	Sphere hitsphere = spheres[hitsphere_id]; /* version with local copy of sphere */
 
 		/* compute the hitpoint using the ray equation */
-		float3 hitpoint = ray.origin + ray.dir * t;
+	float3 hitpoint = ray.origin + ray.dir * t;
 
-		/* compute the surface normal and flip it if necessary to face the incoming ray */
-		float3 normal = normalize(hitpoint - hitsphere.pos);
-		float3 normal_facing = dot(normal, ray.dir) < 0.0f ? normal : normal * (-1.0f);
+	/* compute the surface normal and flip it if necessary to face the incoming ray */
+	float3 normal = normalize(hitpoint - hitsphere.pos);
+	float3 normal_facing = dot(normal, ray.dir) < 0.0f ? normal : normal * (-1.0f);
 
-		/* compute two random numbers to pick a random point on the hemisphere above the hitpoint*/
-		float rand1 = 2.0f * PI * get_random(seed0, seed1);
-		float rand2 = get_random(seed0, seed1);
-		float rand2s = sqrt(rand2);
-
-		/* create a local orthogonal coordinate frame centered at the hitpoint */
-		float3 w = normal_facing;
-		float3 axis = fabs(w.x) > 0.1f ? (float3)(0.0f, 1.0f, 0.0f) : (float3)(1.0f, 0.0f, 0.0f);
-		float3 u = normalize(cross(axis, w));
-		float3 v = cross(w, u);
-
-		/* use the coordinte frame and random numbers to compute the next ray direction */
-		float3 newdir = normalize(u * cos(rand1)*rand2s + v*sin(rand1)*rand2s + w*sqrt(1.0f - rand2));
-
-		/* add a very small offset to the hitpoint to prevent self intersection */
-		ray.origin = hitpoint + normal_facing * EPSILON;
-		ray.dir = newdir;
-
-		/* add the colour and light contributions to the accumulated colour */
-		accum_color += mask * hitsphere.emission;
-
-		/* the mask colour picks up surface colours at each bounce */
-		mask *= hitsphere.color;
-
-		/* perform cosine-weighted importance sampling for diffuse surfaces*/
-		mask *= dot(newdir, normal_facing);
-	}
-
-	return accum_color;
+	return (normal + (float3)(1,1,1))/2;
 }
 
 union Colour{ float c; uchar4 components;};			

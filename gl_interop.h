@@ -1,11 +1,13 @@
+#define GLEW_STATIC
+#define FREEGLUT_STATIC
+
 #include <GL\glew.h>
-#include <GL\glut.h>
+#include <GL\freeglut.h>
 #include <CL\cl.hpp>
 
 //#define GL_SHARING_EXTENSION "cl_khr_gl_sharing"
 
-const int window_width = 1280;
-const int window_height = 720;
+int window_width, window_height;
 
 // OpenGL vertex buffer object
 GLuint vbo;
@@ -17,12 +19,14 @@ void initGL(int argc, char** argv){
 	glutInit(&argc, argv);
 	// specify the display mode to be RGB and single buffering
 	glutInitDisplayMode(GLUT_DOUBLE | GLUT_RGB);
-	// specify the initial window position
-	glutInitWindowPosition(50, 50);
 	// specify the initial window size
+	window_width = 960;
+	window_height = 540;
+	glutInitWindowPosition((glutGet(GLUT_SCREEN_WIDTH) - window_width) / 2,
+		(glutGet(GLUT_SCREEN_HEIGHT) - window_height) / 2);
 	glutInitWindowSize(window_width, window_height);
 	// create the window and set title
-	glutCreateWindow("Basic OpenCL path tracer");
+	glutCreateWindow("Relativistic OpenCL Ray Tracer");
 
 	// register GLUT callback function to display graphics:
 	glutDisplayFunc(render);

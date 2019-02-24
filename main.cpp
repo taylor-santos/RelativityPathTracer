@@ -4,6 +4,7 @@
 #include <iostream>
 #include <fstream>
 #include <vector>
+#include <Windows.h>
 #include "gl_interop.h"
 #include <CL\cl.hpp>
 
@@ -299,10 +300,27 @@ unsigned int WangHash(unsigned int a) {
 
 
 void render(){
-
 	framenumber++;
 
-	cpu_spheres[6].position.s[1] += 0.01;
+	int new_window_width = glutGet(GLUT_WINDOW_WIDTH),
+	    new_window_height = glutGet(GLUT_WINDOW_HEIGHT);
+	if (new_window_width != window_width || new_window_height != window_height) {
+		window_width = new_window_width;
+		window_height = new_window_height;
+		cout << "(" << window_width << "," << window_height << ")" << endl;
+
+		glClearColor(0.0, 0.0, 0.0, 1.0);
+		glMatrixMode(GL_PROJECTION);
+		glLoadIdentity();
+		gluOrtho2D(0.0, window_width, 0.0, window_height);
+
+		glBindBuffer(GL_ARRAY_BUFFER, vbo);
+		unsigned int size = window_width * window_height * sizeof(cl_float3);
+		glBufferData(GL_ARRAY_BUFFER, size, 0, GL_DYNAMIC_DRAW);
+		cl_vbo = BufferGL(context, CL_MEM_WRITE_ONLY, vbo);
+		cl_vbos[0] = cl_vbo;
+		initCLKernel();
+	}
 
 	queue.enqueueWriteBuffer(cl_spheres, CL_TRUE, 0, sphere_count * sizeof(Sphere), cpu_spheres);
 
