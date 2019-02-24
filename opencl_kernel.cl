@@ -5,7 +5,6 @@
 
 __constant float EPSILON = 0.00003f; /* required to compensate for limited float precision */
 __constant float PI = 3.14159265359f;
-__constant int SAMPLES = 16;
 
 typedef struct Ray{
 	float3 origin;
@@ -179,14 +178,7 @@ __kernel void render_kernel(__constant Sphere* spheres, const int width, const i
 	Ray camray = createCamRay(x_coord, y_coord, width, height);
 
 	/* add the light contribution of each sample and average over all samples*/
-	float3 finalcolor = (float3)(0.0f, 0.0f, 0.0f);
-	float invSamples = 1.0f / SAMPLES;
-
-	for (int i = 0; i < SAMPLES; i++)
-		finalcolor += trace(spheres, &camray, sphere_count, &seed0, &seed1) * invSamples;
-
-	finalcolor = (float3)(clamp(finalcolor.x, 0.0f, 1.0f), 
-		clamp(finalcolor.y, 0.0f, 1.0f), clamp(finalcolor.z, 0.0f, 1.0f));
+	float3 finalcolor = trace(spheres, &camray, sphere_count, &seed0, &seed1);
 
 	union Colour fcolour;
 	fcolour.components = (uchar4)(	
