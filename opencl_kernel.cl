@@ -3,8 +3,7 @@
 /* http://raytracey.blogspot.com */
 
 
-__constant float EPSILON = 0.00003f; /* required to compensate for limited float precision */
-__constant float PI = 3.14159265359f;
+__constant double EPSILON = 0.0000001; /* required to compensate for limited float precision */
 
 typedef struct Ray{
 	double3 origin;
