@@ -7,20 +7,20 @@ __constant float EPSILON = 0.00003f; /* required to compensate for limited float
 __constant float PI = 3.14159265359f;
 
 typedef struct Ray{
-	float3 origin;
-	float3 dir;
+	double3 origin;
+	double3 dir;
 } Ray;
 
 typedef struct Sphere{
-	float4 M[4];
-	float4 InvM[4];
+	double4 M[4];
+	double4 InvM[4];
 	float3 color;
 	float3 emission;
 } Sphere;
 
 typedef struct Hit {
-	float dist;
-	float3 normal;
+	double dist;
+	double3 normal;
 } Hit;
 
 static float get_random(unsigned int *seed0, unsigned int *seed1) {
@@ -43,65 +43,65 @@ static float get_random(unsigned int *seed0, unsigned int *seed1) {
 
 Ray createCamRay(const int x_coord, const int y_coord, const int width, const int height){
 
-	float fx = (float)x_coord / (float)width;  /* convert int in range [0 - width] to float in range [0-1] */
-	float fy = (float)y_coord / (float)height; /* convert int in range [0 - height] to float in range [0-1] */
+	double fx = (double)x_coord / (double)width;  /* convert int in range [0 - width] to float in range [0-1] */
+	double fy = (double)y_coord / (double)height; /* convert int in range [0 - height] to float in range [0-1] */
 
 	/* calculate aspect ratio */
-	float aspect_ratio = (float)(width) / (float)(height);
-	float fx2 = (fx - 0.5f) * aspect_ratio;
-	float fy2 = fy - 0.5f;
+	double aspect_ratio = (double)(width) / (double)(height);
+	double fx2 = (fx - 0.5) * aspect_ratio;
+	double fy2 = fy - 0.5;
 
 	/* determine position of pixel on screen */
-	float3 pixel_pos = (float3)(fx2, fy2, 1.0f);
+	double3 pixel_pos = (double3)(fx2, fy2, 1.0);
 
 	/* create camera ray*/
 	Ray ray;
-	ray.origin = (float3)(0, 0, 0); /* fixed camera position */
+	ray.origin = (double3)(0, 0, 0); /* fixed camera position */
 	ray.dir = normalize(pixel_pos); /* vector from camera to pixel on screen */
 
 	return ray;
 }
 
-float3 transformPoint(const float4 M[4], const float3 v) {
-	float4 V = (float4)(v, 1.0);
-	return (float3)(
+double3 transformPoint(const double4 M[4], const double3 v) {
+	double4 V = (double4)(v, 1.0);
+	return (double3)(
 		dot(M[0], V),
 		dot(M[1], V),
 		dot(M[2], V)
 	);
 }
 
-float3 transformDirection(const float4 M[4], const float3 v) {
-	return (float3)(
+double3 transformDirection(const double4 M[4], const double3 v) {
+	return (double3)(
 		dot(M[0].xyz, v),
 		dot(M[1].xyz, v),
 		dot(M[2].xyz, v)
 	);
 }
 
-float3 applyTranspose(const float4 M[4], const float3 v) {
+double3 applyTranspose(const double4 M[4], const double3 v) {
 	return M[0].xyz * v.xxx + M[1].xyz * v.yyy + M[2].xyz * v.zzz;
 }
 
 bool intersect_sphere(const Sphere* sphere, const Ray* ray, Hit *hit)
 {
-	float3 rayToSphere = -transformPoint(sphere->InvM, ray->origin);
-	float3 dir = normalize(transformDirection(sphere->InvM, ray->dir));
-	float b = dot(rayToSphere, dir);
-	float c = dot(rayToSphere, rayToSphere) - 1.0;
-	float disc = b * b - c;
-	if (disc < 0.0f) return false;
+	double3 rayToSphere = -transformPoint(sphere->InvM, ray->origin);
+	double3 dir = normalize(transformDirection(sphere->InvM, ray->dir));
+	double b = dot(rayToSphere, dir);
+	double c = dot(rayToSphere, rayToSphere) - 1.0;
+	double disc = b * b - c;
+	if (disc < 0.0) return false;
 	else disc = sqrt(disc);
-	float dist;
+	double dist;
 	if ((b - disc) > EPSILON) {
 		dist = b - disc;
 	} else if ((b + disc) > EPSILON) {
 		dist = b + disc;
 	} else {
-		dist = 0.0f;
+		dist = 0.0;
 	}
-	float3 objPt = -rayToSphere + dir * dist;
-	float3 worldPt = transformPoint(sphere->M, objPt);
+	double3 objPt = -rayToSphere + dir * dist;
+	double3 worldPt = transformPoint(sphere->M, objPt);
 	hit->dist = length(worldPt);
 	hit->normal = normalize(applyTranspose(sphere->InvM, objPt));
 
@@ -154,13 +154,15 @@ float3 trace(__constant Sphere* spheres, const Ray* camray, const int sphere_cou
 		return accum_color += mask * (float3)(0.15f, 0.15f, 0.25f);
 
 		/* compute the hitpoint using the ray equation */
-	float3 hitpoint = ray.origin + ray.dir * hit.dist;
+	double3 hitpoint = ray.origin + ray.dir * hit.dist;
 
 	/* compute the surface normal and flip it if necessary to face the incoming ray */
-	float3 normal = hit.normal;
-	float3 normal_facing = dot(normal, ray.dir) < 0.0f ? normal : normal * (-1.0f);
+	double3 normal = hit.normal;
+	double3 normal_facing = dot(normal, ray.dir) < 0.0f ? normal : normal * (-1.0f);
 
-	return (normal + (float3)(1,1,1))/2;
+	float3 color = (float3)((float)normal_facing.x, (float)normal_facing.y, (float)normal_facing.z);
+	color = (color + (float3)(1, 1, 1)) / 2;
+	return color;
 }
 
 union Colour { float c; uchar4 components; };
