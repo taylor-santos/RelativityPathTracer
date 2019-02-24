@@ -2,6 +2,7 @@
 /* based on smallpt by Kevin Beason */
 /* http://raytracey.blogspot.com */
 
+
 __constant float EPSILON = 0.00003f; /* required to compensate for limited float precision */
 __constant float PI = 3.14159265359f;
 __constant int SAMPLES = 16;
@@ -12,11 +13,16 @@ typedef struct Ray{
 } Ray;
 
 typedef struct Sphere{
-	float radius;
-	float3 pos;
+	float4 M[4];
+	float4 InvM[4];
 	float3 color;
 	float3 emission;
 } Sphere;
+
+typedef struct Hit {
+	float dist;
+	float3 normal;
+} Hit;
 
 static float get_random(unsigned int *seed0, unsigned int *seed1) {
 
@@ -47,56 +53,84 @@ Ray createCamRay(const int x_coord, const int y_coord, const int width, const in
 	float fy2 = fy - 0.5f;
 
 	/* determine position of pixel on screen */
-	float3 pixel_pos = (float3)(fx2, fy2, 0.0f);
+	float3 pixel_pos = (float3)(fx2, fy2, 1.0f);
 
 	/* create camera ray*/
 	Ray ray;
-	ray.origin = (float3)(0.0f, 0.1f, 2.0f); /* fixed camera position */
-	ray.dir = normalize(pixel_pos - ray.origin); /* vector from camera to pixel on screen */
+	ray.origin = (float3)(0, 0, 0); /* fixed camera position */
+	ray.dir = normalize(pixel_pos); /* vector from camera to pixel on screen */
 
 	return ray;
 }
 
-/* (__global Sphere* sphere, const Ray* ray) */
-float intersect_sphere(const Sphere* sphere, const Ray* ray) /* version using local copy of sphere */
-{
-	float3 rayToCenter = sphere->pos - ray->origin;
-	float b = dot(rayToCenter, ray->dir);
-	float c = dot(rayToCenter, rayToCenter) - sphere->radius*sphere->radius;
-	float disc = b * b - c;
-
-	if (disc < 0.0f) return 0.0f;
-	else disc = sqrt(disc);
-
-	if ((b - disc) > EPSILON) return b - disc;
-	if ((b + disc) > EPSILON) return b + disc;
-
-	return 0.0f;
+float3 transformPoint(const float4 M[4], const float3 v) {
+	float4 V = (float4)(v, 1.0);
+	return (float3)(
+		dot(M[0], V),
+		dot(M[1], V),
+		dot(M[2], V)
+	);
 }
 
-bool intersect_scene(__constant Sphere* spheres, const Ray* ray, float* t, int* sphere_id, const int sphere_count)
+float3 transformDirection(const float4 M[4], const float3 v) {
+	return (float3)(
+		dot(M[0].xyz, v),
+		dot(M[1].xyz, v),
+		dot(M[2].xyz, v)
+	);
+}
+
+float3 applyTranspose(const float4 M[4], const float3 v) {
+	return M[0].xyz * v.xxx + M[1].xyz * v.yyy + M[2].xyz * v.zzz;
+}
+
+bool intersect_sphere(const Sphere* sphere, const Ray* ray, Hit *hit)
+{
+	float3 rayToSphere = -transformPoint(sphere->InvM, ray->origin);
+	float3 dir = normalize(transformDirection(sphere->InvM, ray->dir));
+	float b = dot(rayToSphere, dir);
+	float c = dot(rayToSphere, rayToSphere) - 1.0;
+	float disc = b * b - c;
+	if (disc < 0.0f) return false;
+	else disc = sqrt(disc);
+	float dist;
+	if ((b - disc) > EPSILON) {
+		dist = b - disc;
+	} else if ((b + disc) > EPSILON) {
+		dist = b + disc;
+	} else {
+		dist = 0.0f;
+	}
+	float3 objPt = -rayToSphere + dir * dist;
+	float3 worldPt = transformPoint(sphere->M, objPt);
+	hit->dist = length(worldPt);
+	hit->normal = normalize(applyTranspose(sphere->InvM, objPt));
+
+	return true;
+}
+
+bool intersect_scene(__constant Sphere* spheres, const Ray *ray, Hit *hit, const int sphere_count)
 {
 	/* initialise t to a very large number,
 	so t will be guaranteed to be smaller
 	when a hit with the scene occurs */
 
 	float inf = 1e20f;
-	*t = inf;
+	hit->dist = inf;
 
 	/* check if the ray intersects each sphere in the scene */
-	for (int i = 0; i < sphere_count; i++)  {
-
+	for (int i = 0; i < sphere_count; i++) {
 		Sphere sphere = spheres[i]; /* create local copy of sphere */
 
-		/* float hitdistance = intersect_sphere(&spheres[i], ray); */
-		float hitdistance = intersect_sphere(&sphere, ray);
-		/* keep track of the closest intersection and hitobject found so far */
-		if (hitdistance != 0.0f && hitdistance < *t) {
-			*t = hitdistance;
-			*sphere_id = i;
+		Hit newHit;
+		if (intersect_sphere(&sphere, ray, &newHit)) {
+			if (newHit.dist > 0.0f && newHit.dist < hit->dist) {
+				hit->dist = newHit.dist;
+				hit->normal = newHit.normal;
+			}
 		}
 	}
-	return *t < inf; /* true when ray interesects the scene */
+	return hit->dist < inf; /* true when ray interesects the scene */
 }
 
 
@@ -116,22 +150,21 @@ float3 trace(__constant Sphere* spheres, const Ray* camray, const int sphere_cou
 	int hitsphere_id = 0; /* index of intersected sphere */
 
 	/* if ray misses scene, return background colour */
-	if (!intersect_scene(spheres, &ray, &t, &hitsphere_id, sphere_count))
+	Hit hit;
+	if (!intersect_scene(spheres, &ray, &hit, sphere_count))
 		return accum_color += mask * (float3)(0.15f, 0.15f, 0.25f);
 
-	Sphere hitsphere = spheres[hitsphere_id]; /* version with local copy of sphere */
-
 		/* compute the hitpoint using the ray equation */
-	float3 hitpoint = ray.origin + ray.dir * t;
+	float3 hitpoint = ray.origin + ray.dir * hit.dist;
 
 	/* compute the surface normal and flip it if necessary to face the incoming ray */
-	float3 normal = normalize(hitpoint - hitsphere.pos);
+	float3 normal = hit.normal;
 	float3 normal_facing = dot(normal, ray.dir) < 0.0f ? normal : normal * (-1.0f);
 
 	return (normal + (float3)(1,1,1))/2;
 }
 
-union Colour{ float c; uchar4 components;};			
+union Colour { float c; uchar4 components; };
 
 __kernel void render_kernel(__constant Sphere* spheres, const int width, const int height, const int sphere_count, __global float3* output, const int hashedframenumber)
 {

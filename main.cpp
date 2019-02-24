@@ -42,11 +42,8 @@ unsigned int framenumber = 0;
 
 struct Sphere
 {
-	cl_float radius;
-	cl_float dummy1;
-	cl_float dummy2;
-	cl_float dummy3;
-	cl_float3 position;
+	cl_float4 M[4];
+	cl_float4 InvM[4];
 	cl_float3 color;
 	cl_float3 emission;
 };
@@ -183,63 +180,139 @@ void initOpenCL()
 }
 
 #define float3(x, y, z) {{x, y, z}}  // macro to replace ugly initializer braces
+#define float4(x, y, z, w) {{x, y, z, w}}
+
+bool calcInvM(Sphere *sphere) {
+	float A2323 = sphere->M[2].z * sphere->M[3].w - sphere->M[2].w * sphere->M[3].z;
+	float A1323 = sphere->M[2].y * sphere->M[3].w - sphere->M[2].w * sphere->M[3].y;
+	float A1223 = sphere->M[2].y * sphere->M[3].z - sphere->M[2].z * sphere->M[3].y;
+	float A0323 = sphere->M[2].x * sphere->M[3].w - sphere->M[2].w * sphere->M[3].x;
+	float A0223 = sphere->M[2].x * sphere->M[3].z - sphere->M[2].z * sphere->M[3].x;
+	float A0123 = sphere->M[2].x * sphere->M[3].y - sphere->M[2].y * sphere->M[3].x;
+	float A2313 = sphere->M[1].z * sphere->M[3].w - sphere->M[1].w * sphere->M[3].z;
+	float A1313 = sphere->M[1].y * sphere->M[3].w - sphere->M[1].w * sphere->M[3].y;
+	float A1213 = sphere->M[1].y * sphere->M[3].z - sphere->M[1].z * sphere->M[3].y;
+	float A2312 = sphere->M[1].z * sphere->M[2].w - sphere->M[1].w * sphere->M[2].z;
+	float A1312 = sphere->M[1].y * sphere->M[2].w - sphere->M[1].w * sphere->M[2].y;
+	float A1212 = sphere->M[1].y * sphere->M[2].z - sphere->M[1].z * sphere->M[2].y;
+	float A0313 = sphere->M[1].x * sphere->M[3].w - sphere->M[1].w * sphere->M[3].x;
+	float A0213 = sphere->M[1].x * sphere->M[3].z - sphere->M[1].z * sphere->M[3].x;
+	float A0312 = sphere->M[1].x * sphere->M[2].w - sphere->M[1].w * sphere->M[2].x;
+	float A0212 = sphere->M[1].x * sphere->M[2].z - sphere->M[1].z * sphere->M[2].x;
+	float A0113 = sphere->M[1].x * sphere->M[3].y - sphere->M[1].y * sphere->M[3].x;
+	float A0112 = sphere->M[1].x * sphere->M[2].y - sphere->M[1].y * sphere->M[2].x;
+
+	float det = 
+		  sphere->M[0].x * (sphere->M[1].y * A2323 - sphere->M[1].z * A1323 + sphere->M[1].w * A1223)
+		- sphere->M[0].y * (sphere->M[1].x * A2323 - sphere->M[1].z * A0323 + sphere->M[1].w * A0223)
+		+ sphere->M[0].z * (sphere->M[1].x * A1323 - sphere->M[1].y * A0323 + sphere->M[1].w * A0123)
+		- sphere->M[0].w * (sphere->M[1].x * A1223 - sphere->M[1].y * A0223 + sphere->M[1].z * A0123);
+	if (det == 0.0f) {
+		return false;
+	}
+	det = 1 / det;
+
+	sphere->InvM[0] = float4(
+		det * (sphere->M[1].y * A2323 - sphere->M[1].z * A1323 + sphere->M[1].w * A1223),
+		det * -(sphere->M[0].y * A2323 - sphere->M[0].z * A1323 + sphere->M[0].w * A1223),
+		det * (sphere->M[0].y * A2313 - sphere->M[0].z * A1313 + sphere->M[0].w * A1213),
+		det * -(sphere->M[0].y * A2312 - sphere->M[0].z * A1312 + sphere->M[0].w * A1212)
+	);
+	sphere->InvM[1] = float4(
+		det * -(sphere->M[1].x * A2323 - sphere->M[1].z * A0323 + sphere->M[1].w * A0223),
+		det * (sphere->M[0].x * A2323 - sphere->M[0].z * A0323 + sphere->M[0].w * A0223),
+		det * -(sphere->M[0].x * A2313 - sphere->M[0].z * A0313 + sphere->M[0].w * A0213),
+		det * (sphere->M[0].x * A2312 - sphere->M[0].z * A0312 + sphere->M[0].w * A0212)
+	);
+	sphere->InvM[2] = float4(
+		det * (sphere->M[1].x * A1323 - sphere->M[1].y * A0323 + sphere->M[1].w * A0123),
+		det * -(sphere->M[0].x * A1323 - sphere->M[0].y * A0323 + sphere->M[0].w * A0123),
+		det * (sphere->M[0].x * A1313 - sphere->M[0].y * A0313 + sphere->M[0].w * A0113),
+		det * -(sphere->M[0].x * A1312 - sphere->M[0].y * A0312 + sphere->M[0].w * A0112)
+	);
+	sphere->InvM[3] = float4(
+		det * -(sphere->M[1].x * A1223 - sphere->M[1].y * A0223 + sphere->M[1].z * A0123),
+		det * (sphere->M[0].x * A1223 - sphere->M[0].y * A0223 + sphere->M[0].z * A0123),
+		det * -(sphere->M[0].x * A1213 - sphere->M[0].y * A0213 + sphere->M[0].z * A0113),
+		det * (sphere->M[0].x * A1212 - sphere->M[0].y * A0212 + sphere->M[0].z * A0112)
+	);
+	return true;
+}
+
+float sqr_magnitude(const cl_float3 v) {
+	return v.x*v.x + v.y*v.y + v.z*v.z;
+}
+
+float magnitude(const cl_float3 v) {
+	return sqrt(sqr_magnitude(v));
+}
+
+cl_float3 normalize(const cl_float3 v) {
+	float m = magnitude(v);
+	return float3(v.x / m, v.y / m, v.z / m);
+}
+
+void TRS(Sphere *sphere, cl_float3 translation, float angle, cl_float3 axis, cl_float3 scale) {
+	cl_float3 R[3];
+	float c = cos(angle);
+	float s = sin(angle);
+	cl_float3 u = normalize(axis);
+	R[0] = float3(c + u.x*u.x*(1 - c), u.x*u.y*(1 - c) - u.z*s, u.x*u.z*(1 - c) + u.y*s);
+	R[1] = float3(u.y*u.x*(1 - c) + u.z*s, c + u.y*u.y*(1 - c), u.y*u.z*(1 - c) - u.x*s);
+	R[2] = float3(u.z*u.x*(1 - c) - u.y*s, u.z*u.y*(1 - c) + u.x*s, c + u.z*u.z*(1 - c));
+	sphere->M[0] = float4(R[0].x * scale.x, R[0].y * scale.y, R[0].z * scale.z, translation.x);
+	sphere->M[1] = float4(R[1].x * scale.x, R[1].y * scale.y, R[1].z * scale.z, translation.y);
+	sphere->M[2] = float4(R[2].x * scale.x, R[2].y * scale.y, R[2].z * scale.z, translation.z);
+	sphere->M[3] = float4(0, 0, 0, 1);
+	calcInvM(sphere);
+}
 
 void initScene(Sphere* cpu_spheres){
 
 	// left wall
-	cpu_spheres[0].radius = 200.0f;
-	cpu_spheres[0].position = float3(-200.6f, 0.0f, 0.0f);
 	cpu_spheres[0].color = float3(0.75f, 0.25f, 0.25f);
 	cpu_spheres[0].emission = float3(0.0f, 0.0f, 0.0f);
+	TRS(&cpu_spheres[0], float3(-6, 0, 10), 0, float3(0, 1, 0), float3(0.1f, 10, 10));
 
 	// right wall
-	cpu_spheres[1].radius = 200.0f;
-	cpu_spheres[1].position = float3(200.6f, 0.0f, 0.0f);
 	cpu_spheres[1].color = float3(0.25f, 0.25f, 0.75f);
 	cpu_spheres[1].emission = float3(0.0f, 0.0f, 0.0f);
+	TRS(&cpu_spheres[1], float3(6, 0, 10), 0, float3(0, 1, 0), float3(0.1f, 10, 10));
 
 	// floor
-	cpu_spheres[2].radius = 200.0f;
-	cpu_spheres[2].position = float3(0.0f, -200.4f, 0.0f);
 	cpu_spheres[2].color = float3(0.9f, 0.8f, 0.7f);
 	cpu_spheres[2].emission = float3(0.0f, 0.0f, 0.0f);
+	TRS(&cpu_spheres[2], float3(0, -6, 10), 0, float3(0, 1, 0), float3(10, 0.1f, 10));
 
 	// ceiling
-	cpu_spheres[3].radius = 200.0f;
-	cpu_spheres[3].position = float3(0.0f, 200.4f, 0.0f);
 	cpu_spheres[3].color = float3(0.9f, 0.8f, 0.7f);
 	cpu_spheres[3].emission = float3(0.0f, 0.0f, 0.0f);
+	TRS(&cpu_spheres[3], float3(0, 6, 10), 0, float3(0, 1, 0), float3(10, 0.1f, 10));
 
 	// back wall
-	cpu_spheres[4].radius = 200.0f;
-	cpu_spheres[4].position = float3(0.0f, 0.0f, -200.4f);
 	cpu_spheres[4].color = float3(0.9f, 0.8f, 0.7f);
 	cpu_spheres[4].emission = float3(0.0f, 0.0f, 0.0f);
+	TRS(&cpu_spheres[4], float3(0, 0, -1), 0, float3(0, 1, 0), float3(10, 10, 0.1f));
 
 	// front wall 
-	cpu_spheres[5].radius = 200.0f;
-	cpu_spheres[5].position = float3(0.0f, 0.0f, 202.0f);
 	cpu_spheres[5].color = float3(0.9f, 0.8f, 0.7f);
 	cpu_spheres[5].emission = float3(0.0f, 0.0f, 0.0f);
+	TRS(&cpu_spheres[5], float3(0, 0, 16), 0, float3(0, 1, 0), float3(10, 10, 0.1f));
 
 	// left sphere
-	cpu_spheres[6].radius = 0.16f;
-	cpu_spheres[6].position = float3(-0.25f, -0.24f, -0.1f);
 	cpu_spheres[6].color = float3(0.9f, 0.8f, 0.7f);
 	cpu_spheres[6].emission = float3(0.0f, 0.0f, 0.0f);
+	TRS(&cpu_spheres[6], float3(-3, -4.75f, 12), 0, float3(0, 1, 0), float3(1, 1, 1));
 
 	// right sphere
-	cpu_spheres[7].radius = 0.16f;
-	cpu_spheres[7].position = float3(0.25f, -0.24f, 0.1f);
 	cpu_spheres[7].color = float3(0.9f, 0.8f, 0.7f);
 	cpu_spheres[7].emission = float3(0.0f, 0.0f, 0.0f);
+	TRS(&cpu_spheres[7], float3(0.25f, -0.14f, 1.1f), 0, float3(0, 1, 0), float3(0.16f, 0.16f, 0.16f));
 
 	// lightsource
-	cpu_spheres[8].radius = 1.0f;
-	cpu_spheres[8].position = float3(0.0f, 1.36f, 0.0f);
 	cpu_spheres[8].color = float3(0.0f, 0.0f, 0.0f);
 	cpu_spheres[8].emission = float3(9.0f, 8.0f, 6.0f);
-
+	TRS(&cpu_spheres[8], float3(0, 0.5f, 1), 0, float3(0, 1, 0), float3(0.1f, 0.1f, 0.1f));
 }
 
 void initCLKernel(){
@@ -307,7 +380,6 @@ void render(){
 	if (new_window_width != window_width || new_window_height != window_height) {
 		window_width = new_window_width;
 		window_height = new_window_height;
-		cout << "(" << window_width << "," << window_height << ")" << endl;
 
 		glClearColor(0.0, 0.0, 0.0, 1.0);
 		glMatrixMode(GL_PROJECTION);
