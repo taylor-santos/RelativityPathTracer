@@ -4,6 +4,7 @@
 
 
 __constant double EPSILON = 0.0000001; /* required to compensate for limited float precision */
+__constant int MSAASAMPLES = 2;
 
 typedef struct Ray{
 	double3 origin;
@@ -40,7 +41,7 @@ static float get_random(unsigned int *seed0, unsigned int *seed1) {
 	return (res.f - 2.0f) / 2.0f;
 }
 
-Ray createCamRay(const int x_coord, const int y_coord, const int width, const int height){
+Ray createCamRay(const double x_coord, const double y_coord, const int width, const int height){
 
 	double fx = (double)x_coord / (double)width;  /* convert int in range [0 - width] to float in range [0-1] */
 	double fy = (double)y_coord / (double)height; /* convert int in range [0 - height] to float in range [0-1] */
@@ -137,7 +138,7 @@ bool intersect_scene(__constant Sphere* spheres, const Ray *ray, Hit *hit, const
 /* each ray hitting a surface will be reflected in a random direction (by randomly sampling the hemisphere above the hitpoint) */
 /* small optimisation: diffuse ray directions are calculated using cosine weighted importance sampling */
 
-float3 trace(__constant Sphere* spheres, const Ray* camray, const int sphere_count, const int* seed0, const int* seed1){
+float3 trace(__constant Sphere* spheres, const Ray* camray, const int sphere_count){
 
 	Ray ray = *camray;
 
@@ -171,15 +172,18 @@ __kernel void render_kernel(__constant Sphere* spheres, const int width, const i
 	unsigned int work_item_id = get_global_id(0);	/* the unique global id of the work item for the current pixel */
 	unsigned int x_coord = work_item_id % width;			/* x-coordinate of the pixel */
 	unsigned int y_coord = work_item_id / width;			/* y-coordinate of the pixel */
+	
+	float3 finalcolor = (float3)(0, 0, 0);
 
-	/* seeds for random number generator */
-	unsigned int seed0 = x_coord + hashedframenumber;
-	unsigned int seed1 = y_coord + hashedframenumber;
+	for (int y = 0; y < MSAASAMPLES; y++) {
+		for (int x = 0; x < MSAASAMPLES; x++) {
+			Ray camray = createCamRay((double)x_coord + (double)x/MSAASAMPLES, (double)y_coord + (double)y/ MSAASAMPLES, width, height);
 
-	Ray camray = createCamRay(x_coord, y_coord, width, height);
+			finalcolor += trace(spheres, &camray, sphere_count);
+		}
+	}
+	finalcolor = finalcolor / (MSAASAMPLES*MSAASAMPLES);
 
-	/* add the light contribution of each sample and average over all samples*/
-	float3 finalcolor = trace(spheres, &camray, sphere_count, &seed0, &seed1);
 
 	union Colour fcolour;
 	fcolour.components = (uchar4)(	
