@@ -15,7 +15,7 @@
 using namespace std;
 using namespace cl;
 
-const int sphere_count = 9;
+const int object_count = 9;
 
 
 // OpenCL objects
@@ -25,7 +25,7 @@ Kernel kernel;
 Context context;
 Program program;
 Buffer cl_output;
-Buffer cl_spheres;
+Buffer cl_objects;
 BufferGL cl_vbo;
 vector<Memory> cl_vbos;
 
@@ -40,15 +40,19 @@ unsigned int framenumber = 0;
 // alignment can also be enforced by using __attribute__ ((aligned (16)));
 // see https://www.khronos.org/registry/cl/sdk/1.0/docs/man/xhtml/attributes-variables.html
 
-struct Sphere
+enum objectType{SPHERE, CUBE};
+
+struct Object
 {
 	cl_double4 M[4];
 	cl_double4 InvM[4];
 	cl_float3 color;
-	cl_float3 emission;
+	enum objectType type;
+	cl_float dummy1;
+	cl_float dummy2;
 };
 
-Sphere cpu_spheres[sphere_count];
+Object cpu_objects[object_count];
 
 void pickPlatform(Platform& platform, const vector<Platform>& platforms){
 
@@ -184,59 +188,59 @@ void initOpenCL()
 #define double3(x, y, z) {{x, y, z}}
 #define double4(x, y, z, w) {{x, y, z, w}}
 
-bool calcInvM(Sphere *sphere) {
-	double A2323 = sphere->M[2].z * sphere->M[3].w - sphere->M[2].w * sphere->M[3].z;
-	double A1323 = sphere->M[2].y * sphere->M[3].w - sphere->M[2].w * sphere->M[3].y;
-	double A1223 = sphere->M[2].y * sphere->M[3].z - sphere->M[2].z * sphere->M[3].y;
-	double A0323 = sphere->M[2].x * sphere->M[3].w - sphere->M[2].w * sphere->M[3].x;
-	double A0223 = sphere->M[2].x * sphere->M[3].z - sphere->M[2].z * sphere->M[3].x;
-	double A0123 = sphere->M[2].x * sphere->M[3].y - sphere->M[2].y * sphere->M[3].x;
-	double A2313 = sphere->M[1].z * sphere->M[3].w - sphere->M[1].w * sphere->M[3].z;
-	double A1313 = sphere->M[1].y * sphere->M[3].w - sphere->M[1].w * sphere->M[3].y;
-	double A1213 = sphere->M[1].y * sphere->M[3].z - sphere->M[1].z * sphere->M[3].y;
-	double A2312 = sphere->M[1].z * sphere->M[2].w - sphere->M[1].w * sphere->M[2].z;
-	double A1312 = sphere->M[1].y * sphere->M[2].w - sphere->M[1].w * sphere->M[2].y;
-	double A1212 = sphere->M[1].y * sphere->M[2].z - sphere->M[1].z * sphere->M[2].y;
-	double A0313 = sphere->M[1].x * sphere->M[3].w - sphere->M[1].w * sphere->M[3].x;
-	double A0213 = sphere->M[1].x * sphere->M[3].z - sphere->M[1].z * sphere->M[3].x;
-	double A0312 = sphere->M[1].x * sphere->M[2].w - sphere->M[1].w * sphere->M[2].x;
-	double A0212 = sphere->M[1].x * sphere->M[2].z - sphere->M[1].z * sphere->M[2].x;
-	double A0113 = sphere->M[1].x * sphere->M[3].y - sphere->M[1].y * sphere->M[3].x;
-	double A0112 = sphere->M[1].x * sphere->M[2].y - sphere->M[1].y * sphere->M[2].x;
+bool calcInvM(Object *object) {
+	double A2323 = object->M[2].z * object->M[3].w - object->M[2].w * object->M[3].z;
+	double A1323 = object->M[2].y * object->M[3].w - object->M[2].w * object->M[3].y;
+	double A1223 = object->M[2].y * object->M[3].z - object->M[2].z * object->M[3].y;
+	double A0323 = object->M[2].x * object->M[3].w - object->M[2].w * object->M[3].x;
+	double A0223 = object->M[2].x * object->M[3].z - object->M[2].z * object->M[3].x;
+	double A0123 = object->M[2].x * object->M[3].y - object->M[2].y * object->M[3].x;
+	double A2313 = object->M[1].z * object->M[3].w - object->M[1].w * object->M[3].z;
+	double A1313 = object->M[1].y * object->M[3].w - object->M[1].w * object->M[3].y;
+	double A1213 = object->M[1].y * object->M[3].z - object->M[1].z * object->M[3].y;
+	double A2312 = object->M[1].z * object->M[2].w - object->M[1].w * object->M[2].z;
+	double A1312 = object->M[1].y * object->M[2].w - object->M[1].w * object->M[2].y;
+	double A1212 = object->M[1].y * object->M[2].z - object->M[1].z * object->M[2].y;
+	double A0313 = object->M[1].x * object->M[3].w - object->M[1].w * object->M[3].x;
+	double A0213 = object->M[1].x * object->M[3].z - object->M[1].z * object->M[3].x;
+	double A0312 = object->M[1].x * object->M[2].w - object->M[1].w * object->M[2].x;
+	double A0212 = object->M[1].x * object->M[2].z - object->M[1].z * object->M[2].x;
+	double A0113 = object->M[1].x * object->M[3].y - object->M[1].y * object->M[3].x;
+	double A0112 = object->M[1].x * object->M[2].y - object->M[1].y * object->M[2].x;
 
 	double det = 
-		  sphere->M[0].x * (sphere->M[1].y * A2323 - sphere->M[1].z * A1323 + sphere->M[1].w * A1223)
-		- sphere->M[0].y * (sphere->M[1].x * A2323 - sphere->M[1].z * A0323 + sphere->M[1].w * A0223)
-		+ sphere->M[0].z * (sphere->M[1].x * A1323 - sphere->M[1].y * A0323 + sphere->M[1].w * A0123)
-		- sphere->M[0].w * (sphere->M[1].x * A1223 - sphere->M[1].y * A0223 + sphere->M[1].z * A0123);
+		  object->M[0].x * (object->M[1].y * A2323 - object->M[1].z * A1323 + object->M[1].w * A1223)
+		- object->M[0].y * (object->M[1].x * A2323 - object->M[1].z * A0323 + object->M[1].w * A0223)
+		+ object->M[0].z * (object->M[1].x * A1323 - object->M[1].y * A0323 + object->M[1].w * A0123)
+		- object->M[0].w * (object->M[1].x * A1223 - object->M[1].y * A0223 + object->M[1].z * A0123);
 	if (det == 0.0) {
 		return false;
 	}
 	det = 1 / det;
 
-	sphere->InvM[0] = double4(
-		det * (sphere->M[1].y * A2323 - sphere->M[1].z * A1323 + sphere->M[1].w * A1223),
-		det * -(sphere->M[0].y * A2323 - sphere->M[0].z * A1323 + sphere->M[0].w * A1223),
-		det * (sphere->M[0].y * A2313 - sphere->M[0].z * A1313 + sphere->M[0].w * A1213),
-		det * -(sphere->M[0].y * A2312 - sphere->M[0].z * A1312 + sphere->M[0].w * A1212)
+	object->InvM[0] = double4(
+		det * (object->M[1].y * A2323 - object->M[1].z * A1323 + object->M[1].w * A1223),
+		det * -(object->M[0].y * A2323 - object->M[0].z * A1323 + object->M[0].w * A1223),
+		det * (object->M[0].y * A2313 - object->M[0].z * A1313 + object->M[0].w * A1213),
+		det * -(object->M[0].y * A2312 - object->M[0].z * A1312 + object->M[0].w * A1212)
 	);
-	sphere->InvM[1] = double4(
-		det * -(sphere->M[1].x * A2323 - sphere->M[1].z * A0323 + sphere->M[1].w * A0223),
-		det * (sphere->M[0].x * A2323 - sphere->M[0].z * A0323 + sphere->M[0].w * A0223),
-		det * -(sphere->M[0].x * A2313 - sphere->M[0].z * A0313 + sphere->M[0].w * A0213),
-		det * (sphere->M[0].x * A2312 - sphere->M[0].z * A0312 + sphere->M[0].w * A0212)
+	object->InvM[1] = double4(
+		det * -(object->M[1].x * A2323 - object->M[1].z * A0323 + object->M[1].w * A0223),
+		det * (object->M[0].x * A2323 - object->M[0].z * A0323 + object->M[0].w * A0223),
+		det * -(object->M[0].x * A2313 - object->M[0].z * A0313 + object->M[0].w * A0213),
+		det * (object->M[0].x * A2312 - object->M[0].z * A0312 + object->M[0].w * A0212)
 	);
-	sphere->InvM[2] = double4(
-		det * (sphere->M[1].x * A1323 - sphere->M[1].y * A0323 + sphere->M[1].w * A0123),
-		det * -(sphere->M[0].x * A1323 - sphere->M[0].y * A0323 + sphere->M[0].w * A0123),
-		det * (sphere->M[0].x * A1313 - sphere->M[0].y * A0313 + sphere->M[0].w * A0113),
-		det * -(sphere->M[0].x * A1312 - sphere->M[0].y * A0312 + sphere->M[0].w * A0112)
+	object->InvM[2] = double4(
+		det * (object->M[1].x * A1323 - object->M[1].y * A0323 + object->M[1].w * A0123),
+		det * -(object->M[0].x * A1323 - object->M[0].y * A0323 + object->M[0].w * A0123),
+		det * (object->M[0].x * A1313 - object->M[0].y * A0313 + object->M[0].w * A0113),
+		det * -(object->M[0].x * A1312 - object->M[0].y * A0312 + object->M[0].w * A0112)
 	);
-	sphere->InvM[3] = double4(
-		det * -(sphere->M[1].x * A1223 - sphere->M[1].y * A0223 + sphere->M[1].z * A0123),
-		det * (sphere->M[0].x * A1223 - sphere->M[0].y * A0223 + sphere->M[0].z * A0123),
-		det * -(sphere->M[0].x * A1213 - sphere->M[0].y * A0213 + sphere->M[0].z * A0113),
-		det * (sphere->M[0].x * A1212 - sphere->M[0].y * A0212 + sphere->M[0].z * A0112)
+	object->InvM[3] = double4(
+		det * -(object->M[1].x * A1223 - object->M[1].y * A0223 + object->M[1].z * A0123),
+		det * (object->M[0].x * A1223 - object->M[0].y * A0223 + object->M[0].z * A0123),
+		det * -(object->M[0].x * A1213 - object->M[0].y * A0213 + object->M[0].z * A0113),
+		det * (object->M[0].x * A1212 - object->M[0].y * A0212 + object->M[0].z * A0112)
 	);
 	return true;
 }
@@ -254,7 +258,7 @@ cl_double3 normalize(const cl_double3 v) {
 	return double3(v.x / m, v.y / m, v.z / m);
 }
 
-void TRS(Sphere *sphere, cl_double3 translation, double angle, cl_double3 axis, cl_double3 scale) {
+void TRS(Object *object, cl_double3 translation, double angle, cl_double3 axis, cl_double3 scale) {
 	cl_double3 R[3];
 	double c = cos(angle);
 	double s = sin(angle);
@@ -262,59 +266,59 @@ void TRS(Sphere *sphere, cl_double3 translation, double angle, cl_double3 axis, 
 	R[0] = double3(c + u.x*u.x*(1 - c), u.x*u.y*(1 - c) - u.z*s, u.x*u.z*(1 - c) + u.y*s);
 	R[1] = double3(u.y*u.x*(1 - c) + u.z*s, c + u.y*u.y*(1 - c), u.y*u.z*(1 - c) - u.x*s);
 	R[2] = double3(u.z*u.x*(1 - c) - u.y*s, u.z*u.y*(1 - c) + u.x*s, c + u.z*u.z*(1 - c));
-	sphere->M[0] = double4(R[0].x * scale.x, R[0].y * scale.y, R[0].z * scale.z, translation.x);
-	sphere->M[1] = double4(R[1].x * scale.x, R[1].y * scale.y, R[1].z * scale.z, translation.y);
-	sphere->M[2] = double4(R[2].x * scale.x, R[2].y * scale.y, R[2].z * scale.z, translation.z);
-	sphere->M[3] = double4(0, 0, 0, 1);
-	calcInvM(sphere);
+	object->M[0] = double4(R[0].x * scale.x, R[0].y * scale.y, R[0].z * scale.z, translation.x);
+	object->M[1] = double4(R[1].x * scale.x, R[1].y * scale.y, R[1].z * scale.z, translation.y);
+	object->M[2] = double4(R[2].x * scale.x, R[2].y * scale.y, R[2].z * scale.z, translation.z);
+	object->M[3] = double4(0, 0, 0, 1);
+	calcInvM(object);
 }
 
-void initScene(Sphere* cpu_spheres){
+void initScene(Object* cpu_objects){
 
 	// left wall
-	cpu_spheres[0].color = float3(0.75f, 0.25f, 0.25f);
-	cpu_spheres[0].emission = float3(0.0f, 0.0f, 0.0f);
-	TRS(&cpu_spheres[0], double3(-6, 0, 10), 0, double3(0, 1, 0), double3(0.1f, 10, 10));
+	cpu_objects[0].color = float3(0.75f, 0.25f, 0.25f);
+	cpu_objects[0].type = CUBE;
+	TRS(&cpu_objects[0], double3(-6, 0, 10), 0, double3(0, 1, 0), double3(0.1f, 10, 10));
 
 	// right wall
-	cpu_spheres[1].color = float3(0.25f, 0.25f, 0.75f);
-	cpu_spheres[1].emission = float3(0.0f, 0.0f, 0.0f);
-	TRS(&cpu_spheres[1], double3(6, 0, 10), 0, double3(0, 1, 0), double3(0.1f, 10, 10));
+	cpu_objects[1].color = float3(0.25f, 0.25f, 0.75f);
+	cpu_objects[1].type = CUBE;
+	TRS(&cpu_objects[1], double3(6, 0, 10), 0, double3(0, 1, 0), double3(0.1f, 10, 10));
 
 	// floor
-	cpu_spheres[2].color = float3(0.9f, 0.8f, 0.7f);
-	cpu_spheres[2].emission = float3(0.0f, 0.0f, 0.0f);
-	TRS(&cpu_spheres[2], double3(0, -6, 10), 0, double3(0, 1, 0), double3(10, 0.1f, 10));
+	cpu_objects[2].color = float3(0.9f, 0.8f, 0.7f);
+	cpu_objects[2].type = CUBE;
+	TRS(&cpu_objects[2], double3(0, -6, 10), 0, double3(0, 1, 0), double3(10, 0.1f, 10));
 
 	// ceiling
-	cpu_spheres[3].color = float3(0.9f, 0.8f, 0.7f);
-	cpu_spheres[3].emission = float3(0.0f, 0.0f, 0.0f);
-	TRS(&cpu_spheres[3], double3(0, 6, 10), 0, double3(0, 1, 0), double3(10, 0.1f, 10));
+	cpu_objects[3].color = float3(0.9f, 0.8f, 0.7f);
+	cpu_objects[3].type = CUBE;
+	TRS(&cpu_objects[3], double3(0, 6, 10), 0, double3(0, 1, 0), double3(10, 0.1f, 10));
 
 	// back wall
-	cpu_spheres[4].color = float3(0.9f, 0.8f, 0.7f);
-	cpu_spheres[4].emission = float3(0.0f, 0.0f, 0.0f);
-	TRS(&cpu_spheres[4], double3(0, 0, -1), 0, double3(0, 1, 0), double3(10, 10, 0.1f));
+	cpu_objects[4].color = float3(0.9f, 0.8f, 0.7f);
+	cpu_objects[4].type = CUBE;
+	//TRS(&cpu_objects[4], double3(0, 0, -1), 0, double3(0, 1, 0), double3(10, 10, 0.1f));
 
 	// front wall 
-	cpu_spheres[5].color = float3(0.9f, 0.8f, 0.7f);
-	cpu_spheres[5].emission = float3(0.0f, 0.0f, 0.0f);
-	TRS(&cpu_spheres[5], double3(0, 0, 16), 0, double3(0, 1, 0), double3(10, 10, 0.1f));
+	cpu_objects[5].color = float3(0.9f, 0.8f, 0.7f);
+	cpu_objects[5].type = CUBE;
+	TRS(&cpu_objects[5], double3(0, 0, 16), 0, double3(0, 1, 0), double3(10, 10, 0.1f));
 
-	// left sphere
-	cpu_spheres[6].color = float3(0.9f, 0.8f, 0.7f);
-	cpu_spheres[6].emission = float3(0.0f, 0.0f, 0.0f);
-	TRS(&cpu_spheres[6], double3(-3, -4.75f, 12), 0, double3(0, 1, 0), double3(1, 1, 1));
+	// left cube
+	cpu_objects[6].color = float3(0.9f, 0.8f, 0.7f);
+	cpu_objects[6].type = CUBE;
+	TRS(&cpu_objects[6], double3(-3, -4.75f, 12), 0, double3(0, 1, 0), double3(1, 1, 1));
 
 	// right sphere
-	cpu_spheres[7].color = float3(0.9f, 0.8f, 0.7f);
-	cpu_spheres[7].emission = float3(0.0f, 0.0f, 0.0f);
-	TRS(&cpu_spheres[7], double3(0.25f, -0.14f, 1.1f), 0, double3(0, 1, 0), double3(0.00001, 0.16f, 0.16f));
+	cpu_objects[7].color = float3(0.1f, 0.2f, 0.9f);
+	cpu_objects[7].type = SPHERE;
+	TRS(&cpu_objects[7], double3(0.25f, -0.14f, 1.1f), 0, double3(0, 1, 0), double3(0.05, 0.16f, 0.16f));
 
 	// lightsource
-	cpu_spheres[8].color = float3(0.0f, 0.0f, 0.0f);
-	cpu_spheres[8].emission = float3(9.0f, 8.0f, 6.0f);
-	TRS(&cpu_spheres[8], double3(0, 0.5f, 1), 0, double3(0, 1, 0), double3(0.1f, 0.1f, 0.1f));
+	cpu_objects[8].color = float3(0.0f, 1.0f, 0.0f);
+	cpu_objects[8].type = SPHERE;
+	TRS(&cpu_objects[8], double3(0, 0.5f, 1), 0, double3(0, 1, 0), double3(0.1f, 0.1f, 0.1f));
 }
 
 void initCLKernel(){
@@ -327,10 +331,10 @@ void initCLKernel(){
 
 	// specify OpenCL kernel arguments
 	//kernel.setArg(0, cl_output);
-	kernel.setArg(0, cl_spheres);
+	kernel.setArg(0, cl_objects);
 	kernel.setArg(1, window_width);
 	kernel.setArg(2, window_height);
-	kernel.setArg(3, sphere_count);
+	kernel.setArg(3, object_count);
 	kernel.setArg(4, cl_vbo);
 	kernel.setArg(5, framenumber);
 }
@@ -396,9 +400,11 @@ void render(){
 		initCLKernel();
 	}
 
-	queue.enqueueWriteBuffer(cl_spheres, CL_TRUE, 0, sphere_count * sizeof(Sphere), cpu_spheres);
+	TRS(&cpu_objects[6], double3(-3, -4.75f, 12), framenumber/100.0, double3(0, 1, 0), double3(1, 1, 1));
 
-	kernel.setArg(0, cl_spheres);
+	queue.enqueueWriteBuffer(cl_objects, CL_TRUE, 0, object_count * sizeof(Object), cpu_objects);
+
+	kernel.setArg(0, cl_objects);
 	kernel.setArg(5, WangHash(framenumber));
 
 	runKernel();
@@ -429,10 +435,10 @@ void main(int argc, char** argv){
 	glFinish();
 
 	// initialise scene
-	initScene(cpu_spheres);
+	initScene(cpu_objects);
 
-	cl_spheres = Buffer(context, CL_MEM_READ_ONLY, sphere_count * sizeof(Sphere));
-	queue.enqueueWriteBuffer(cl_spheres, CL_TRUE, 0, sphere_count * sizeof(Sphere), cpu_spheres);
+	cl_objects = Buffer(context, CL_MEM_READ_ONLY, object_count * sizeof(Object));
+	queue.enqueueWriteBuffer(cl_objects, CL_TRUE, 0, object_count * sizeof(Object), cpu_objects);
 
 	// create OpenCL buffer from OpenGL vertex buffer object
 	cl_vbo = BufferGL(context, CL_MEM_WRITE_ONLY, vbo);

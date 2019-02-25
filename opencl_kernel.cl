@@ -4,23 +4,26 @@
 
 
 __constant double EPSILON = 0.0000001; /* required to compensate for limited float precision */
-__constant int MSAASAMPLES = 2;
+__constant int MSAASAMPLES = 1;
 
 typedef struct Ray{
 	double3 origin;
 	double3 dir;
 } Ray;
 
-typedef struct Sphere{
+enum objectType { SPHERE, CUBE };
+
+typedef struct Object {
 	double4 M[4];
 	double4 InvM[4];
 	float3 color;
-	float3 emission;
-} Sphere;
+	enum objectType type;
+} Object;
 
 typedef struct Hit {
 	double dist;
 	double3 normal;
+	float3 color;
 } Hit;
 
 static float get_random(unsigned int *seed0, unsigned int *seed1) {
@@ -58,11 +61,10 @@ Ray createCamRay(const double x_coord, const double y_coord, const int width, co
 	Ray ray;
 	ray.origin = (double3)(0, 0, 0); /* fixed camera position */
 	ray.dir = normalize(pixel_pos); /* vector from camera to pixel on screen */
-
 	return ray;
 }
 
-double3 transformPoint(const double4 M[4], const double3 v) {
+double3 transformPoint(__constant double4 M[4], const double3 v) {
 	double4 V = (double4)(v, 1.0);
 	return (double3)(
 		dot(M[0], V),
@@ -71,7 +73,7 @@ double3 transformPoint(const double4 M[4], const double3 v) {
 	);
 }
 
-double3 transformDirection(const double4 M[4], const double3 v) {
+double3 transformDirection(__constant double4 M[4], const double3 v) {
 	return (double3)(
 		dot(M[0].xyz, v),
 		dot(M[1].xyz, v),
@@ -79,14 +81,49 @@ double3 transformDirection(const double4 M[4], const double3 v) {
 	);
 }
 
-double3 applyTranspose(const double4 M[4], const double3 v) {
+double3 applyTranspose(__constant double4 M[4], const double3 v) {
 	return M[0].xyz * v.xxx + M[1].xyz * v.yyy + M[2].xyz * v.zzz;
 }
 
-bool intersect_sphere(const Sphere* sphere, const Ray* ray, Hit *hit)
-{
-	double3 rayToSphere = -transformPoint(sphere->InvM, ray->origin);
-	double3 dir = normalize(transformDirection(sphere->InvM, ray->dir));
+bool intersect_cube(__constant Object *objects, int index, const Ray *ray, Hit *hit) {
+	double3 origin = transformPoint(objects[index].InvM, ray->origin);
+	double3 dir = normalize(transformDirection(objects[index].InvM, ray->dir));
+	double3 dir_inv = 1.0 / dir;
+	double t1 = (-1.0 - origin.x) * dir_inv.x;
+	double t2 = ( 1.0 - origin.x) * dir_inv.x;
+	double tmin = min(t1, t2);
+	double tmax = max(t1, t2);
+	t1 = (-1.0 - origin.y) * dir_inv.y;
+	t2 = ( 1.0 - origin.y) * dir_inv.y;
+	tmin = max(tmin, min(min(t1, t2), tmax));
+	tmax = min(tmax, max(max(t1, t2), tmin));
+	t1 = (-1.0 - origin.z) * dir_inv.z;
+	t2 = ( 1.0 - origin.z) * dir_inv.z;
+	tmin = max(tmin, min(min(t1, t2), tmax));
+	tmax = min(tmax, max(max(t1, t2), tmin));
+	if (tmin > 0.0 && tmax > tmin) {
+		double3 pt = origin + dir * tmin;
+		double3 normal = (double3)(0, 0, 0);
+		if (pt.x*pt.x - 1 < EPSILON && pt.x*pt.x - 1 > -EPSILON) {
+			normal.x = round(pt.x);
+		}else if (pt.y*pt.y - 1 < EPSILON && pt.y*pt.y - 1 > -EPSILON) {
+			normal.y = round(pt.y);
+		}
+		else if (pt.z*pt.z - 1 < EPSILON && pt.z*pt.z - 1 > -EPSILON) {
+			normal.z = round(pt.z);
+		}
+		double3 worldPt = transformPoint(objects[index].M, pt);
+		hit->dist = length(worldPt);
+		hit->normal = normalize(applyTranspose(objects[index].InvM, normal));
+		hit->color = objects[index].color;
+		return true;
+	}
+	return false;
+}
+
+bool intersect_sphere(__constant Object *objects, const int index, const Ray *ray, Hit *hit) {
+	double3 rayToSphere = -transformPoint(objects[index].InvM, ray->origin);
+	double3 dir = normalize(transformDirection(objects[index].InvM, ray->dir));
 	double b = dot(rayToSphere, dir);
 	double c = dot(rayToSphere, rayToSphere) - 1.0;
 	double disc = b * b - c;
@@ -101,14 +138,14 @@ bool intersect_sphere(const Sphere* sphere, const Ray* ray, Hit *hit)
 		dist = 0.0;
 	}
 	double3 objPt = -rayToSphere + dir * dist;
-	double3 worldPt = transformPoint(sphere->M, objPt);
+	double3 worldPt = transformPoint(objects[index].M, objPt);
 	hit->dist = length(worldPt);
-	hit->normal = normalize(applyTranspose(sphere->InvM, objPt));
-
+	hit->normal = normalize(applyTranspose(objects[index].InvM, objPt));
+	hit->color = objects[index].color;
 	return true;
 }
 
-bool intersect_scene(__constant Sphere* spheres, const Ray *ray, Hit *hit, const int sphere_count)
+bool intersect_scene(__constant Object* objects, const Ray *ray, Hit *hit, const int object_count)
 {
 	/* initialise t to a very large number,
 	so t will be guaranteed to be smaller
@@ -117,16 +154,24 @@ bool intersect_scene(__constant Sphere* spheres, const Ray *ray, Hit *hit, const
 	float inf = 1e20f;
 	hit->dist = inf;
 
-	/* check if the ray intersects each sphere in the scene */
-	for (int i = 0; i < sphere_count; i++) {
-		Sphere sphere = spheres[i]; /* create local copy of sphere */
-
+	/* check if the ray intersects each object in the scene */
+	for (int i = 0; i < object_count; i++) {
 		Hit newHit;
-		if (intersect_sphere(&sphere, ray, &newHit)) {
-			if (newHit.dist > 0.0f && newHit.dist < hit->dist) {
-				hit->dist = newHit.dist;
-				hit->normal = newHit.normal;
+		switch (objects[i].type) {
+		case SPHERE:
+			if (intersect_sphere(objects, i, ray, &newHit)) {
+				if (newHit.dist > 0.0f && newHit.dist < hit->dist) {
+					*hit = newHit;
+				}
 			}
+			break;
+		case CUBE:
+			if (intersect_cube(objects, i, ray, &newHit)) {
+				if (newHit.dist > 0.0f && newHit.dist < hit->dist) {
+					*hit = newHit;
+				}
+			}
+			break;
 		}
 	}
 	return hit->dist < inf; /* true when ray interesects the scene */
@@ -138,7 +183,7 @@ bool intersect_scene(__constant Sphere* spheres, const Ray *ray, Hit *hit, const
 /* each ray hitting a surface will be reflected in a random direction (by randomly sampling the hemisphere above the hitpoint) */
 /* small optimisation: diffuse ray directions are calculated using cosine weighted importance sampling */
 
-float3 trace(__constant Sphere* spheres, const Ray* camray, const int sphere_count){
+float3 trace(__constant Object* objects, const Ray* camray, const int object_count){
 
 	Ray ray = *camray;
 
@@ -146,11 +191,10 @@ float3 trace(__constant Sphere* spheres, const Ray* camray, const int sphere_cou
 	float3 mask = (float3)(1.0f, 1.0f, 1.0f);
 
 	float t;   /* distance to intersection */
-	int hitsphere_id = 0; /* index of intersected sphere */
 
 	/* if ray misses scene, return background colour */
 	Hit hit;
-	if (!intersect_scene(spheres, &ray, &hit, sphere_count))
+	if (!intersect_scene(objects, &ray, &hit, object_count))
 		return accum_color += mask * (float3)(0.15f, 0.15f, 0.25f);
 
 		/* compute the hitpoint using the ray equation */
@@ -162,12 +206,12 @@ float3 trace(__constant Sphere* spheres, const Ray* camray, const int sphere_cou
 
 	float3 color = (float3)((float)normal_facing.x, (float)normal_facing.y, (float)normal_facing.z);
 	color = (color + (float3)(1, 1, 1)) / 2;
-	return color;
+	return color * hit.color;
 }
 
 union Colour { float c; uchar4 components; };
 
-__kernel void render_kernel(__constant Sphere* spheres, const int width, const int height, const int sphere_count, __global float3* output, const int hashedframenumber)
+__kernel void render_kernel(__constant Object* objects, const int width, const int height, const int object_count, __global float3* output, const int hashedframenumber)
 {
 	unsigned int work_item_id = get_global_id(0);	/* the unique global id of the work item for the current pixel */
 	unsigned int x_coord = work_item_id % width;			/* x-coordinate of the pixel */
@@ -179,7 +223,7 @@ __kernel void render_kernel(__constant Sphere* spheres, const int width, const i
 		for (int x = 0; x < MSAASAMPLES; x++) {
 			Ray camray = createCamRay((double)x_coord + (double)x/MSAASAMPLES, (double)y_coord + (double)y/ MSAASAMPLES, width, height);
 
-			finalcolor += trace(spheres, &camray, sphere_count);
+			finalcolor += trace(objects, &camray, object_count);
 		}
 	}
 	finalcolor = finalcolor / (MSAASAMPLES*MSAASAMPLES);
