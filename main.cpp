@@ -59,10 +59,10 @@ struct Object
 };
 
 Object cpu_objects[object_count];
-std::vector<cl_float3> vertices;
+std::vector<cl_double3> vertices;
 std::vector<unsigned int> triangles;
-std::vector<cl_float2> uvs;
-std::vector<cl_float3> normals;
+std::vector<cl_double2> uvs;
+std::vector<cl_double3> normals;
 
 void pickPlatform(Platform& platform, const vector<Platform>& platforms){
 
@@ -219,10 +219,10 @@ cl_double3 normalize(const cl_double3 v) {
 
 bool OBJReader(
 	std::string path,
-	std::vector<cl_float3> &vertices,
+	std::vector<cl_double3> &vertices,
 	std::vector<unsigned int> &triangles,
-	std::vector<cl_float2> &uvs,
-	std::vector<cl_float3> &normals
+	std::vector<cl_double2> &uvs,
+	std::vector<cl_double3> &normals
 ) {
 	if (path.substr(path.size() - 4, 4) != ".obj") return false;
 	ifstream file(path);
@@ -241,7 +241,7 @@ bool OBJReader(
 		std::string prefix;
 		stream >> prefix;
 		if (prefix == "v") {
-			cl_float3 vert;
+			cl_double3 vert;
 			stream >> vert.x >> vert.y >> vert.z;
 			if (stream.fail()) {
 				std::cerr << "Error reading OBJ file \"" << path
@@ -251,7 +251,7 @@ bool OBJReader(
 			vertices.push_back(vert);
 		}
 		else if (prefix == "vt") {
-			cl_float2 uv;
+			cl_double2 uv;
 			stream >> uv.x >> uv.y;
 			if (stream.fail()) {
 				std::cerr << "Error reading OBJ file \"" << path
@@ -261,7 +261,7 @@ bool OBJReader(
 			uvs.push_back(uv);
 		}
 		else if (prefix == "vn") {
-			cl_float3 norm;
+			cl_double3 norm;
 			stream >> norm.x >> norm.y >> norm.z;
 			if (stream.fail()) {
 				std::cerr << "Error reading OBJ file \"" << path
@@ -284,9 +284,9 @@ bool OBJReader(
 				if (!std::getline(vertstream, norm, '/')) {
 					norm = "0";
 				}
-				triangles.push_back(stoul(vert));
-				triangles.push_back(stoul(uv));
-				triangles.push_back(stoul(norm));
+				triangles.push_back(stoul(vert)-1);
+				//triangles.push_back(stoul(uv));
+				//triangles.push_back(stoul(norm));
 			}
 		}
 		lineno++;
@@ -429,12 +429,13 @@ void initCLKernel(){
 
 	// specify OpenCL kernel arguments
 	kernel.setArg(0, cl_objects);
-	kernel.setArg(1, cl_vertices);
-	kernel.setArg(2, cl_triangles);
-	kernel.setArg(3, window_width);
-	kernel.setArg(4, window_height);
-	kernel.setArg(5, object_count);
-	kernel.setArg(6, cl_vbo);
+	kernel.setArg(1, object_count);
+	kernel.setArg(2, cl_vertices);
+	kernel.setArg(3, cl_triangles);
+	kernel.setArg(4, (unsigned int)(triangles.size()/3));
+	kernel.setArg(5, window_width);
+	kernel.setArg(6, window_height);
+	kernel.setArg(7, cl_vbo);
 }
 
 void runKernel(){
@@ -498,7 +499,7 @@ void render(){
 		initCLKernel();
 	}
 
-	TRS(&cpu_objects[6], double3(-3, -4.75f, 12), framenumber/100.0, double3(0, 1, 0), double3(1, 1, 1));
+	TRS(&cpu_objects[6], double3(0, 0, 12), framenumber/100.0, double3(0, 1, 0), double3(20, 20, 20));
 
 	queue.enqueueWriteBuffer(cl_objects, CL_TRUE, 0, object_count * sizeof(Object), cpu_objects);
 
@@ -537,11 +538,11 @@ void main(int argc, char** argv){
 	cl_objects = Buffer(context, CL_MEM_READ_ONLY, object_count * sizeof(Object));
 	queue.enqueueWriteBuffer(cl_objects, CL_TRUE, 0, object_count * sizeof(Object), cpu_objects);
 
-	cl_vertices = Buffer(context, CL_MEM_READ_ONLY, vertices.size() * sizeof(cl_float3));
-	queue.enqueueWriteBuffer(cl_vertices, CL_TRUE, 0, vertices.size() * sizeof(cl_float3), &vertices[0]);
+	cl_vertices = Buffer(context, CL_MEM_READ_ONLY, vertices.size() * sizeof(cl_double3));
+	queue.enqueueWriteBuffer(cl_vertices, CL_TRUE, 0, vertices.size() * sizeof(cl_double3), &vertices[0]);
 
 	cl_triangles = Buffer(context, CL_MEM_READ_ONLY, triangles.size() * sizeof(unsigned int));
-	queue.enqueueWriteBuffer(cl_vertices, CL_TRUE, 0, triangles.size() * sizeof(unsigned int), &triangles[0]);
+	queue.enqueueWriteBuffer(cl_triangles, CL_TRUE, 0, triangles.size() * sizeof(unsigned int), &triangles[0]);
 
 	// create OpenCL buffer from OpenGL vertex buffer object
 	cl_vbo = BufferGL(context, CL_MEM_WRITE_ONLY, vbo);
