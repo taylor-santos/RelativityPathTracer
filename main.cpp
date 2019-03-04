@@ -3,7 +3,9 @@
 
 #include <iostream>
 #include <fstream>
+#include <sstream>
 #include <vector>
+#include <array>
 #include <Windows.h>
 #include "gl_interop.h"
 #include <CL\cl.hpp>
@@ -188,6 +190,105 @@ void initOpenCL()
 #define double3(x, y, z) {{x, y, z}}
 #define double4(x, y, z, w) {{x, y, z, w}}
 
+float sqr_magnitude(const cl_float3 v) {
+	return v.x*v.x + v.y*v.y + v.z*v.z;
+}
+double sqr_magnitude(const cl_double3 v) {
+	return v.x*v.x + v.y*v.y + v.z*v.z;
+}
+
+float magnitude(const cl_float3 v) {
+	return sqrt(sqr_magnitude(v));
+}
+double magnitude(const cl_double3 v) {
+	return sqrt(sqr_magnitude(v));
+}
+
+cl_float3 normalize(const cl_float3 v) {
+	float m = magnitude(v);
+	return float3(v.x / m, v.y / m, v.z / m);
+}
+cl_double3 normalize(const cl_double3 v) {
+	double m = magnitude(v);
+	return double3(v.x / m, v.y / m, v.z / m);
+}
+
+bool OBJReader(
+	std::string path,
+	std::vector<cl_float3> &vertices,
+	std::vector<std::array<unsigned int, 3>> &triangles,
+	std::vector<cl_float2> &uvs,
+	std::vector<cl_float3> &normals
+) {
+	if (path.substr(path.size() - 4, 4) != ".obj") return false;
+	ifstream file(path);
+	if (!file) {
+		perror("Error opening OBJ file");
+		return false;
+	}
+	vertices.clear();
+	triangles.clear();
+	uvs.clear();
+	normals.clear();
+	std::string line;
+	int lineno = 0;
+	while (std::getline(file, line)) {
+		std::istringstream stream(line);
+		std::string prefix;
+		stream >> prefix;
+		if (prefix == "v") {
+			cl_float3 vert;
+			stream >> vert.x >> vert.y >> vert.z;
+			if (stream.fail()) {
+				std::cerr << "Error reading OBJ file \"" << path
+					<< "\": Invalid syntax on line " << lineno << std::endl;
+				return false;
+			}
+			vertices.push_back(vert);
+		}
+		else if (prefix == "vt") {
+			cl_float2 uv;
+			stream >> uv.x >> uv.y;
+			if (stream.fail()) {
+				std::cerr << "Error reading OBJ file \"" << path
+					<< "\": Invalid syntax on line " << lineno << std::endl;
+				return false;
+			}
+			uvs.push_back(uv);
+		}
+		else if (prefix == "vn") {
+			cl_float3 norm;
+			stream >> norm.x >> norm.y >> norm.z;
+			if (stream.fail()) {
+				std::cerr << "Error reading OBJ file \"" << path
+					<< "\": Invalid syntax on line " << lineno << std::endl;
+				return false;
+			}
+			norm = normalize(norm);
+			normals.push_back(norm);
+		}
+		else if (prefix == "f") {
+		std::string tri;
+		for (int i = 0; i < 3; i++) {
+			stream >> tri;
+			std::istringstream vertstream(tri);
+			std::string vert, uv, norm;
+			std::getline(vertstream, vert, '/');
+			if (!std::getline(vertstream, uv, '/')) {
+				uv = "0";
+			}
+			if (!std::getline(vertstream, norm, '/')) {
+				norm = "0";
+			}
+			triangles.push_back({ stoul(vert), stoul(uv), stoul(norm) });
+		}
+		}
+
+		lineno++;
+	}
+	return true;
+}
+
 bool calcInvM(Object *object) {
 	double A2323 = object->M[2].z * object->M[3].w - object->M[2].w * object->M[3].z;
 	double A1323 = object->M[2].y * object->M[3].w - object->M[2].w * object->M[3].y;
@@ -208,8 +309,8 @@ bool calcInvM(Object *object) {
 	double A0113 = object->M[1].x * object->M[3].y - object->M[1].y * object->M[3].x;
 	double A0112 = object->M[1].x * object->M[2].y - object->M[1].y * object->M[2].x;
 
-	double det = 
-		  object->M[0].x * (object->M[1].y * A2323 - object->M[1].z * A1323 + object->M[1].w * A1223)
+	double det =
+		object->M[0].x * (object->M[1].y * A2323 - object->M[1].z * A1323 + object->M[1].w * A1223)
 		- object->M[0].y * (object->M[1].x * A2323 - object->M[1].z * A0323 + object->M[1].w * A0223)
 		+ object->M[0].z * (object->M[1].x * A1323 - object->M[1].y * A0323 + object->M[1].w * A0123)
 		- object->M[0].w * (object->M[1].x * A1223 - object->M[1].y * A0223 + object->M[1].z * A0123);
@@ -245,19 +346,6 @@ bool calcInvM(Object *object) {
 	return true;
 }
 
-double sqr_magnitude(const cl_double3 v) {
-	return v.x*v.x + v.y*v.y + v.z*v.z;
-}
-
-double magnitude(const cl_double3 v) {
-	return sqrt(sqr_magnitude(v));
-}
-
-cl_double3 normalize(const cl_double3 v) {
-	float m = magnitude(v);
-	return double3(v.x / m, v.y / m, v.z / m);
-}
-
 void TRS(Object *object, cl_double3 translation, double angle, cl_double3 axis, cl_double3 scale) {
 	cl_double3 R[3];
 	double c = cos(angle);
@@ -273,7 +361,15 @@ void TRS(Object *object, cl_double3 translation, double angle, cl_double3 axis, 
 	calcInvM(object);
 }
 
-void initScene(Object* cpu_objects){
+void initScene(Object* cpu_objects) {
+	std::vector<cl_float3> vertices;
+	std::vector<std::array<unsigned int, 3>> triangles;
+	std::vector<cl_float2> uvs;
+	std::vector<cl_float3> normals;
+	if (!OBJReader("models/StanfordBunny.obj", vertices, triangles, uvs, normals)) {
+		exit(EXIT_FAILURE);
+	}
+
 
 	// left wall
 	cpu_objects[0].color = float3(0.75f, 0.25f, 0.25f);
