@@ -23,6 +23,7 @@ typedef struct Object {
 typedef struct Hit {
 	double dist;
 	double3 normal;
+	double2 uv;
 	float3 color;
 } Hit;
 
@@ -64,7 +65,7 @@ Ray createCamRay(const double x_coord, const double y_coord, const int width, co
 	return ray;
 }
 
-double3 transformPoint(__constant double4 M[4], const double3 v) {
+double3 transformPoint(const double4 M[4], const double3 v) {
 	double4 V = (double4)(v, 1.0);
 	return (double3)(
 		dot(M[0], V),
@@ -73,7 +74,7 @@ double3 transformPoint(__constant double4 M[4], const double3 v) {
 	);
 }
 
-double3 transformDirection(__constant double4 M[4], const double3 v) {
+double3 transformDirection(const double4 M[4], const double3 v) {
 	return (double3)(
 		dot(M[0].xyz, v),
 		dot(M[1].xyz, v),
@@ -81,11 +82,11 @@ double3 transformDirection(__constant double4 M[4], const double3 v) {
 	);
 }
 
-double3 applyTranspose(__constant double4 M[4], const double3 v) {
+double3 applyTranspose(const double4 M[4], const double3 v) {
 	return M[0].xyz * v.xxx + M[1].xyz * v.yyy + M[2].xyz * v.zzz;
 }
 
-bool intersect_cube(__constant Object *objects, int index, const Ray *ray, Hit *hit) {
+bool intersect_cube(global const Object *objects, int index, const Ray *ray, Hit *hit) {
 	double3 origin = transformPoint(objects[index].InvM, ray->origin);
 	double3 dir = normalize(transformDirection(objects[index].InvM, ray->dir));
 	double3 dir_inv = 1.0 / dir;
@@ -121,7 +122,7 @@ bool intersect_cube(__constant Object *objects, int index, const Ray *ray, Hit *
 	return false;
 }
 
-bool intersect_sphere(__constant Object *objects, const int index, const Ray *ray, Hit *hit) {
+bool intersect_sphere(global const Object *objects, const int index, const Ray *ray, Hit *hit) {
 	double3 rayToSphere = -transformPoint(objects[index].InvM, ray->origin);
 	double3 dir = normalize(transformDirection(objects[index].InvM, ray->dir));
 	double b = dot(rayToSphere, dir);
@@ -145,7 +146,44 @@ bool intersect_sphere(__constant Object *objects, const int index, const Ray *ra
 	return true;
 }
 
-bool intersect_scene(__constant Object* objects, const Ray *ray, Hit *hit, const int object_count)
+bool IntersectTriangle(const double3 A, const double3 B, const double3 C, const Ray *ray, Hit *hit) {
+	/* https://en.wikipedia.org/wiki/M%C3%B6ller%E2%80%93Trumbore_intersection_algorithm */
+
+	double3 edge1 = B - A;
+	double3 edge2 = C - A;
+	double3 h = cross(ray->dir, edge2);
+	double a = dot(edge1, h);
+	if (-EPSILON < a && a < EPSILON) {
+		return false;
+	}
+	double f = 1.0 / a;
+	double3 s = ray->origin - A;
+	double2 uv;
+	uv.x = f * dot(s, h);
+	if (uv.x < 0 || uv.x > 1) {
+		return false;
+	}
+	double3 q = cross(s, edge1);
+	uv.y = f * dot(ray->dir, q);
+	if (uv.y < 0 || uv.x + uv.y > 1) {
+		return false;
+	}
+	double d = f * dot(edge2, q);
+	if (d > EPSILON) {
+		hit->dist = d;
+		hit->uv = uv;
+		return true;
+	}
+	else {
+		return false;
+	}
+}
+
+bool intersect_triangle(global const float3 *vertices, global const unsigned int *triangles) {
+
+}
+
+bool intersect_scene(global const Object* objects, const Ray *ray, Hit *hit, const int object_count)
 {
 	/* initialise t to a very large number,
 	so t will be guaranteed to be smaller
@@ -183,7 +221,7 @@ bool intersect_scene(__constant Object* objects, const Ray *ray, Hit *hit, const
 /* each ray hitting a surface will be reflected in a random direction (by randomly sampling the hemisphere above the hitpoint) */
 /* small optimisation: diffuse ray directions are calculated using cosine weighted importance sampling */
 
-float3 trace(__constant Object* objects, const Ray* camray, const int object_count){
+float3 trace(global const Object* objects, const int object_count, const Ray* camray){
 
 	Ray ray = *camray;
 
@@ -211,7 +249,7 @@ float3 trace(__constant Object* objects, const Ray* camray, const int object_cou
 
 union Colour { float c; uchar4 components; };
 
-__kernel void render_kernel(__constant Object* objects, const int width, const int height, const int object_count, __global float3* output, const int hashedframenumber)
+__kernel void render_kernel(global const Object* objects, global const float3 *vertices, global const int *triangles, const int width, const int height, const int object_count, __global float3* output)
 {
 	unsigned int work_item_id = get_global_id(0);	/* the unique global id of the work item for the current pixel */
 	unsigned int x_coord = work_item_id % width;			/* x-coordinate of the pixel */
@@ -223,7 +261,7 @@ __kernel void render_kernel(__constant Object* objects, const int width, const i
 		for (int x = 0; x < MSAASAMPLES; x++) {
 			Ray camray = createCamRay((double)x_coord + (double)x/MSAASAMPLES, (double)y_coord + (double)y/ MSAASAMPLES, width, height);
 
-			finalcolor += trace(objects, &camray, object_count);
+			finalcolor += trace(objects, object_count, &camray);
 		}
 	}
 	finalcolor = finalcolor / (MSAASAMPLES*MSAASAMPLES);
