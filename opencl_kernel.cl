@@ -30,8 +30,10 @@ typedef struct Hit {
 typedef struct Octree {
 	double3 min;
 	double3 max;
+	int trisIndex,
+		trisCount;
 	int children[8];
-	int neighbors[8];
+	int neighbors[6];
 } Octree;
 
 static float get_random(unsigned int *seed0, unsigned int *seed1) {
@@ -230,6 +232,7 @@ bool intersect_mesh(
 	global const unsigned int *triangles,
 	const unsigned int face_count,
 	global const Octree *octrees,
+	global const int *octreeTris,
 	const Ray *ray,
 	Hit *hit
 ) {
@@ -246,7 +249,8 @@ bool intersect_mesh(
 
 		newHit.color = objects[index].color;
 		bool didHit = false;
-		for (int i = 0; i < face_count; i++) {
+		for (int i = octrees[0].trisIndex; i < octrees[0].trisIndex + octrees[0].trisCount; i++) {
+			int tri = octreeTris[i];
 			double3 A = vertices[triangles[9 * i + 3 * 0]];
 			double3 B = vertices[triangles[9 * i + 3 * 1]];
 			double3 C = vertices[triangles[9 * i + 3 * 2]];
@@ -283,6 +287,7 @@ bool intersect_scene(
 	global const unsigned int *triangles,
 	const unsigned int face_count,
 	global const Octree *octrees,
+	global const int *octreeTris,
 	const Ray *ray,
 	Hit *hit
 ) {
@@ -298,7 +303,7 @@ bool intersect_scene(
 		Hit newHit;
 		newHit.dist = inf;
 		if (i == 6) {
-			if (intersect_mesh(objects, i, vertices, normals, triangles, face_count, octrees, ray, &newHit)) {
+			if (intersect_mesh(objects, i, vertices, normals, triangles, face_count, octrees, octreeTris, ray, &newHit)) {
 				if (newHit.dist > 0.0f && newHit.dist < hit->dist) {
 					*hit = newHit;
 					break;
@@ -341,6 +346,7 @@ float3 trace(
 	global const unsigned int *triangles,
 	const unsigned int face_count,
 	global const Octree *octrees,
+	global const int *octreeTris,
 	const Ray* camray
 ) {
 	float3 accum_color = (float3)(0.0f, 0.0f, 0.0f);
@@ -350,7 +356,7 @@ float3 trace(
 
 	/* if ray misses scene, return background colour */
 	Hit hit;
-	if (!intersect_scene(objects, object_count, vertices, normals, triangles, face_count, octrees, camray, &hit))
+	if (!intersect_scene(objects, object_count, vertices, normals, triangles, face_count, octrees, octreeTris, camray, &hit))
 		return accum_color += mask * (float3)(0.15f, 0.15f, 0.25f);
 
 	/* compute the hitpoint using the ray equation */
@@ -375,6 +381,7 @@ __kernel void render_kernel(
 	global const int *triangles,
 	const int face_count,
 	global const Octree *octrees,
+	global const int *octreeTris,
 	const int width,
 	const int height,
 	__global float3* output
@@ -389,7 +396,7 @@ __kernel void render_kernel(
 		for (int x = 0; x < MSAASAMPLES; x++) {
 			Ray camray = createCamRay((double)x_coord + (double)x/MSAASAMPLES, (double)y_coord + (double)y/ MSAASAMPLES, width, height);
 
-			finalcolor += trace(objects, object_count, vertices, normals, triangles, face_count, octrees, &camray);
+			finalcolor += trace(objects, object_count, vertices, normals, triangles, face_count, octrees, octreeTris, &camray);
 		}
 	}
 	finalcolor = finalcolor / (MSAASAMPLES*MSAASAMPLES);

@@ -33,6 +33,7 @@ Buffer cl_normals;
 Buffer cl_uvs;
 Buffer cl_triangles;
 Buffer cl_octrees;
+Buffer cl_octreeTris;
 BufferGL cl_vbo;
 vector<Memory> cl_vbos;
 
@@ -65,8 +66,10 @@ struct Octree
 {
 	cl_double3 min;
 	cl_double3 max;
+	int trisIndex,
+		trisCount;
 	int children[8]  = { -1, -1, -1, -1, -1, -1, -1, -1 };
-	int neighbors[8] = { -1, -1, -1, -1, -1, -1, -1, -1 };
+	int neighbors[6] = { -1, -1, -1, -1, -1, -1 };
 };
 
 struct Mesh
@@ -76,6 +79,9 @@ struct Mesh
 	std::vector<cl_double2> uvs;
 	std::vector<cl_double3> normals;
 	std::vector<Octree> octree;
+	std::vector<int> octreeTris;
+
+	void GenerateOctree();
 };
 
 Mesh theMesh;
@@ -233,11 +239,35 @@ cl_double3 normalize(const cl_double3 v) {
 	return double3(v.x / m, v.y / m, v.z / m);
 }
 
+cl_double3 operator+(const cl_double3 v1, const cl_double3 v2) {
+	return double3(
+		v1.x + v2.x,
+		v1.y + v2.y,
+		v1.z + v2.z
+	);
+}
+
 cl_double3 operator-(const cl_double3 v1, const cl_double3 v2) {
 	return double3(
 		v1.x - v2.x,
 		v1.y - v2.y,
 		v1.z - v2.z
+	);
+}
+
+cl_double3 operator*(const cl_double3 v, const double c) {
+	return double3(
+		v.x * c,
+		v.y * c,
+		v.z * c
+	);
+}
+
+cl_double3 operator/(const cl_double3 v, const double c) {
+	return double3(
+		v.x / c,
+		v.y / c,
+		v.z / c
 	);
 }
 
@@ -263,6 +293,93 @@ cl_double3 elementwise_max(const cl_double3 a, const cl_double3 b) {
 		max(a.y, b.y),
 		max(a.z, b.z)
 	);
+}
+
+void Subdivide(Mesh *mesh, int octreeIndex) {
+	cl_double3 extents = mesh->octree[octreeIndex].max - mesh->octree[octreeIndex].min;
+	cl_double3 half_extents = extents / 2;
+	cl_double3 ex = double3(half_extents.x, 0, 0);
+	cl_double3 ey = double3(0, half_extents.y, 0);
+	cl_double3 ez = double3(0, 0, half_extents.z);
+	for (int z = 0; z < 2; z++) {
+		for (int y = 0; y < 2; y++) {
+			for (int x = 0; x < 2; x++) {
+				Octree child;
+				child.min = mesh->octree[octreeIndex].min + ex * x + ey * y + ez * z;
+				child.max = child.min + half_extents;
+				mesh->octree[octreeIndex].children[4 * z + 2 * y + x] = mesh->octree.size();
+				mesh->octree.push_back(child);
+			}
+		}
+	}
+	mesh->octree[mesh->octree[octreeIndex].children[0]].neighbors[0] = mesh->octree[octreeIndex].neighbors[0];
+	mesh->octree[mesh->octree[octreeIndex].children[0]].neighbors[1] = mesh->octree[octreeIndex].children[1];
+	mesh->octree[mesh->octree[octreeIndex].children[0]].neighbors[2] = mesh->octree[octreeIndex].neighbors[1];
+	mesh->octree[mesh->octree[octreeIndex].children[0]].neighbors[3] = mesh->octree[octreeIndex].children[4];
+	mesh->octree[mesh->octree[octreeIndex].children[0]].neighbors[4] = mesh->octree[octreeIndex].neighbors[5];
+	mesh->octree[mesh->octree[octreeIndex].children[0]].neighbors[5] = mesh->octree[octreeIndex].children[2];
+	mesh->octree[mesh->octree[octreeIndex].children[1]].neighbors[0] = mesh->octree[octreeIndex].children[0];
+	mesh->octree[mesh->octree[octreeIndex].children[1]].neighbors[1] = mesh->octree[octreeIndex].neighbors[1];
+	mesh->octree[mesh->octree[octreeIndex].children[1]].neighbors[2] = mesh->octree[octreeIndex].neighbors[2];
+	mesh->octree[mesh->octree[octreeIndex].children[1]].neighbors[3] = mesh->octree[octreeIndex].children[5];
+	mesh->octree[mesh->octree[octreeIndex].children[1]].neighbors[4] = mesh->octree[octreeIndex].neighbors[5];
+	mesh->octree[mesh->octree[octreeIndex].children[1]].neighbors[5] = mesh->octree[octreeIndex].children[3];
+	mesh->octree[mesh->octree[octreeIndex].children[2]].neighbors[0] = mesh->octree[octreeIndex].neighbors[0];
+	mesh->octree[mesh->octree[octreeIndex].children[2]].neighbors[1] = mesh->octree[octreeIndex].children[3];
+	mesh->octree[mesh->octree[octreeIndex].children[2]].neighbors[2] = mesh->octree[octreeIndex].neighbors[2];
+	mesh->octree[mesh->octree[octreeIndex].children[2]].neighbors[3] = mesh->octree[octreeIndex].children[6];
+	mesh->octree[mesh->octree[octreeIndex].children[2]].neighbors[4] = mesh->octree[octreeIndex].children[0];
+	mesh->octree[mesh->octree[octreeIndex].children[2]].neighbors[5] = mesh->octree[octreeIndex].neighbors[4];
+	mesh->octree[mesh->octree[octreeIndex].children[3]].neighbors[0] = mesh->octree[octreeIndex].children[2];
+	mesh->octree[mesh->octree[octreeIndex].children[3]].neighbors[1] = mesh->octree[octreeIndex].neighbors[1];
+	mesh->octree[mesh->octree[octreeIndex].children[3]].neighbors[2] = mesh->octree[octreeIndex].neighbors[2];
+	mesh->octree[mesh->octree[octreeIndex].children[3]].neighbors[3] = mesh->octree[octreeIndex].children[7];
+	mesh->octree[mesh->octree[octreeIndex].children[3]].neighbors[4] = mesh->octree[octreeIndex].children[1];
+	mesh->octree[mesh->octree[octreeIndex].children[3]].neighbors[5] = mesh->octree[octreeIndex].neighbors[4];
+	mesh->octree[mesh->octree[octreeIndex].children[4]].neighbors[0] = mesh->octree[octreeIndex].neighbors[0];
+	mesh->octree[mesh->octree[octreeIndex].children[4]].neighbors[1] = mesh->octree[octreeIndex].children[5];
+	mesh->octree[mesh->octree[octreeIndex].children[4]].neighbors[2] = mesh->octree[octreeIndex].children[0];
+	mesh->octree[mesh->octree[octreeIndex].children[4]].neighbors[3] = mesh->octree[octreeIndex].neighbors[3];
+	mesh->octree[mesh->octree[octreeIndex].children[4]].neighbors[4] = mesh->octree[octreeIndex].neighbors[5];
+	mesh->octree[mesh->octree[octreeIndex].children[4]].neighbors[5] = mesh->octree[octreeIndex].children[6];
+	mesh->octree[mesh->octree[octreeIndex].children[5]].neighbors[0] = mesh->octree[octreeIndex].children[4];
+	mesh->octree[mesh->octree[octreeIndex].children[5]].neighbors[1] = mesh->octree[octreeIndex].neighbors[1];
+	mesh->octree[mesh->octree[octreeIndex].children[5]].neighbors[2] = mesh->octree[octreeIndex].children[1];
+	mesh->octree[mesh->octree[octreeIndex].children[5]].neighbors[3] = mesh->octree[octreeIndex].neighbors[3];
+	mesh->octree[mesh->octree[octreeIndex].children[5]].neighbors[4] = mesh->octree[octreeIndex].neighbors[5];
+	mesh->octree[mesh->octree[octreeIndex].children[5]].neighbors[5] = mesh->octree[octreeIndex].children[7];
+	mesh->octree[mesh->octree[octreeIndex].children[6]].neighbors[0] = mesh->octree[octreeIndex].neighbors[0];
+	mesh->octree[mesh->octree[octreeIndex].children[6]].neighbors[1] = mesh->octree[octreeIndex].children[7];
+	mesh->octree[mesh->octree[octreeIndex].children[6]].neighbors[2] = mesh->octree[octreeIndex].children[2];
+	mesh->octree[mesh->octree[octreeIndex].children[6]].neighbors[3] = mesh->octree[octreeIndex].neighbors[3];
+	mesh->octree[mesh->octree[octreeIndex].children[6]].neighbors[4] = mesh->octree[octreeIndex].children[4];
+	mesh->octree[mesh->octree[octreeIndex].children[6]].neighbors[5] = mesh->octree[octreeIndex].neighbors[4];
+	mesh->octree[mesh->octree[octreeIndex].children[7]].neighbors[0] = mesh->octree[octreeIndex].children[6];
+	mesh->octree[mesh->octree[octreeIndex].children[7]].neighbors[1] = mesh->octree[octreeIndex].neighbors[1];
+	mesh->octree[mesh->octree[octreeIndex].children[7]].neighbors[2] = mesh->octree[octreeIndex].children[3];
+	mesh->octree[mesh->octree[octreeIndex].children[7]].neighbors[3] = mesh->octree[octreeIndex].neighbors[3];
+	mesh->octree[mesh->octree[octreeIndex].children[7]].neighbors[4] = mesh->octree[octreeIndex].children[5];
+	mesh->octree[mesh->octree[octreeIndex].children[7]].neighbors[5] = mesh->octree[octreeIndex].neighbors[4];
+}
+
+void Mesh::GenerateOctree() {
+	Octree newOctree;
+	octreeTris.clear();
+	newOctree.trisCount = 0;
+	newOctree.trisIndex = 0;
+	newOctree.min = vertices[triangles[0]];
+	newOctree.max = vertices[triangles[0]];
+	for (int i = 1; i < triangles.size() / 3; i++) {
+		cl_double3 vert = vertices[triangles[3 * i]];
+		newOctree.min = elementwise_min(newOctree.min, vert);
+		newOctree.max = elementwise_max(newOctree.max, vert);
+	}
+	for (int i = 0; i < triangles.size() / 9; i++) {
+		octreeTris.push_back(i);
+		newOctree.trisCount++;
+	}
+	octree.push_back(newOctree);
+	Subdivide(this, 0);
 }
 
 bool OBJReader(std::string path, Mesh &mesh) {
@@ -342,15 +459,7 @@ bool OBJReader(std::string path, Mesh &mesh) {
 		}
 		lineno++;
 	}
-	Octree octree;
-	octree.min = mesh.vertices[mesh.triangles[0]];
-	octree.max = mesh.vertices[mesh.triangles[0]];
-	for (int i = 3; i < mesh.triangles.size() / 3; i++) {
-		cl_double3 vert = mesh.vertices[mesh.triangles[3 * i]];
-		octree.min = elementwise_min(octree.min, vert);
-		octree.max = elementwise_max(octree.max, vert);
-	}
-	mesh.octree.push_back(octree);
+	mesh.GenerateOctree();
 	return true;
 }
 
@@ -495,9 +604,10 @@ void initCLKernel(){
 	kernel.setArg(4, cl_triangles);
 	kernel.setArg(5, (unsigned int)(theMesh.triangles.size()/9));
 	kernel.setArg(6, cl_octrees);
-	kernel.setArg(7, window_width);
-	kernel.setArg(8, window_height);
-	kernel.setArg(9, cl_vbo);
+	kernel.setArg(7, cl_octreeTris);
+	kernel.setArg(8, window_width);
+	kernel.setArg(9, window_height);
+	kernel.setArg(10, cl_vbo);
 }
 
 void runKernel(){
@@ -611,6 +721,9 @@ void main(int argc, char** argv){
 
 	cl_octrees = Buffer(context, CL_MEM_READ_ONLY, theMesh.octree.size() * sizeof(Octree));
 	queue.enqueueWriteBuffer(cl_octrees, CL_TRUE, 0, theMesh.octree.size() * sizeof(Octree), &theMesh.octree[0]);
+	
+	cl_octreeTris = Buffer(context, CL_MEM_READ_ONLY, theMesh.octreeTris.size() * sizeof(int));
+	queue.enqueueWriteBuffer(cl_octreeTris, CL_TRUE, 0, theMesh.octreeTris.size() * sizeof(int), &theMesh.octreeTris[0]);
 
 
 	// create OpenCL buffer from OpenGL vertex buffer object
