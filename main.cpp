@@ -59,12 +59,26 @@ struct Object
 };
 
 Object cpu_objects[object_count];
-std::vector<cl_double3> vertices;
-std::vector<unsigned int> triangles;
-std::vector<cl_double2> uvs;
-std::vector<cl_double3> normals;
 
-void pickPlatform(Platform& platform, const vector<Platform>& platforms){
+struct Octree
+{
+	cl_double3 min;
+	cl_double3 max;
+	int children[8];
+	int neighbors[8];
+};
+
+struct Mesh
+{
+	std::vector<cl_double3> vertices;
+	std::vector<unsigned int> triangles;
+	std::vector<cl_double2> uvs;
+	std::vector<cl_double3> normals;
+};
+
+Mesh theMesh;
+
+void pickPlatform(Platform& platform, const vector<Platform>& platforms) {
 
 	if (platforms.size() == 1) platform = platforms[0];
 	else{
@@ -217,23 +231,33 @@ cl_double3 normalize(const cl_double3 v) {
 	return double3(v.x / m, v.y / m, v.z / m);
 }
 
-bool OBJReader(
-	std::string path,
-	std::vector<cl_double3> &vertices,
-	std::vector<unsigned int> &triangles,
-	std::vector<cl_double2> &uvs,
-	std::vector<cl_double3> &normals
-) {
+cl_double3 operator-(const cl_double3 v1, const cl_double3 v2) {
+	return double3(
+		v1.x - v2.x,
+		v1.y - v2.y,
+		v1.z - v2.z
+	);
+}
+
+cl_double3 cross(const cl_double3 a, const cl_double3 b) {
+	return double3(
+		a.y * b.z - a.z * b.y,
+		a.z * b.x - a.x * b.z,
+		a.x * b.y - a.y * b.x
+	);
+}
+
+bool OBJReader(std::string path, Mesh &mesh) {
 	if (path.substr(path.size() - 4, 4) != ".obj") return false;
 	ifstream file(path);
 	if (!file) {
 		perror("Error opening OBJ file");
 		return false;
 	}
-	vertices.clear();
-	triangles.clear();
-	uvs.clear();
-	normals.clear();
+	mesh.vertices.clear();
+	mesh.triangles.clear();
+	mesh.uvs.clear();
+	mesh.normals.clear();
 	std::string line;
 	int lineno = 0;
 	while (std::getline(file, line)) {
@@ -248,7 +272,7 @@ bool OBJReader(
 					<< "\": Invalid syntax on line " << lineno << std::endl;
 				return false;
 			}
-			vertices.push_back(vert);
+			mesh.vertices.push_back(vert);
 		}
 		else if (prefix == "vt") {
 			cl_double2 uv;
@@ -258,7 +282,7 @@ bool OBJReader(
 					<< "\": Invalid syntax on line " << lineno << std::endl;
 				return false;
 			}
-			uvs.push_back(uv);
+			mesh.uvs.push_back(uv);
 		}
 		else if (prefix == "vn") {
 			cl_double3 norm;
@@ -269,24 +293,33 @@ bool OBJReader(
 				return false;
 			}
 			norm = normalize(norm);
-			normals.push_back(norm);
+			mesh.normals.push_back(norm);
 		}
 		else if (prefix == "f") {
 			std::string tri;
+			bool needsNormal = false;
 			for (int i = 0; i < 3; i++) {
 				stream >> tri;
 				std::istringstream vertstream(tri);
 				std::string vert, uv, norm;
 				std::getline(vertstream, vert, '/');
 				if (!std::getline(vertstream, uv, '/')) {
-					uv = "0";
+					uv = "1";
 				}
 				if (!std::getline(vertstream, norm, '/')) {
-					norm = "0";
+					norm = std::to_string(mesh.normals.size()+1);
+					needsNormal = true;
 				}
-				triangles.push_back(stoul(vert)-1);
-				//triangles.push_back(stoul(uv));
-				//triangles.push_back(stoul(norm));
+				mesh.triangles.push_back(stoul(vert)-1);
+				mesh.triangles.push_back(stoul(uv)-1);
+				mesh.triangles.push_back(stoul(norm)-1);
+			}
+			if (needsNormal) {
+				cl_double3 A = mesh.vertices[mesh.triangles[mesh.triangles.size() - 3]];
+				cl_double3 B = mesh.vertices[mesh.triangles[mesh.triangles.size() - 6]];
+				cl_double3 C = mesh.vertices[mesh.triangles[mesh.triangles.size() - 9]];
+				cl_double3 N = normalize(cross(B - A, C - A));
+				mesh.normals.push_back(N);
 			}
 		}
 		lineno++;
@@ -367,7 +400,7 @@ void TRS(Object *object, cl_double3 translation, double angle, cl_double3 axis, 
 }
 
 void initScene(Object* cpu_objects) {
-	if (!OBJReader("models/bunny.obj", vertices, triangles, uvs, normals)) {
+	if (!OBJReader("models/pear.obj", theMesh)) {
 		exit(EXIT_FAILURE);
 	}
 
@@ -404,7 +437,7 @@ void initScene(Object* cpu_objects) {
 	TRS(&cpu_objects[5], double3(0, 0, 16), 0, double3(0, 1, 0), double3(10, 10, 0.1f));
 
 	// left cube
-	cpu_objects[6].color = float3(0.9f, 0.8f, 0.7f);
+	cpu_objects[6].color = float3(1, 1, 1);
 	cpu_objects[6].type = CUBE;
 	TRS(&cpu_objects[6], double3(-3, -4.75f, 12), 0, double3(0, 1, 0), double3(1, 1, 1));
 
@@ -431,11 +464,12 @@ void initCLKernel(){
 	kernel.setArg(0, cl_objects);
 	kernel.setArg(1, object_count);
 	kernel.setArg(2, cl_vertices);
-	kernel.setArg(3, cl_triangles);
-	kernel.setArg(4, (unsigned int)(triangles.size()/3));
-	kernel.setArg(5, window_width);
-	kernel.setArg(6, window_height);
-	kernel.setArg(7, cl_vbo);
+	kernel.setArg(3, cl_normals);
+	kernel.setArg(4, cl_triangles);
+	kernel.setArg(5, (unsigned int)(theMesh.triangles.size()/9));
+	kernel.setArg(6, window_width);
+	kernel.setArg(7, window_height);
+	kernel.setArg(8, cl_vbo);
 }
 
 void runKernel(){
@@ -499,7 +533,7 @@ void render(){
 		initCLKernel();
 	}
 
-	TRS(&cpu_objects[6], double3(0, 0, 12), framenumber/100.0, double3(0, 1, 0), double3(20, 20, 20));
+	TRS(&cpu_objects[6], double3(0, 0, 12), framenumber/100.0, double3(0, 1, 0), double3(1, 1, 1));
 
 	queue.enqueueWriteBuffer(cl_objects, CL_TRUE, 0, object_count * sizeof(Object), cpu_objects);
 
@@ -538,11 +572,15 @@ void main(int argc, char** argv){
 	cl_objects = Buffer(context, CL_MEM_READ_ONLY, object_count * sizeof(Object));
 	queue.enqueueWriteBuffer(cl_objects, CL_TRUE, 0, object_count * sizeof(Object), cpu_objects);
 
-	cl_vertices = Buffer(context, CL_MEM_READ_ONLY, vertices.size() * sizeof(cl_double3));
-	queue.enqueueWriteBuffer(cl_vertices, CL_TRUE, 0, vertices.size() * sizeof(cl_double3), &vertices[0]);
+	cl_vertices = Buffer(context, CL_MEM_READ_ONLY, theMesh.vertices.size() * sizeof(cl_double3));
+	queue.enqueueWriteBuffer(cl_vertices, CL_TRUE, 0, theMesh.vertices.size() * sizeof(cl_double3), &theMesh.vertices[0]);
 
-	cl_triangles = Buffer(context, CL_MEM_READ_ONLY, triangles.size() * sizeof(unsigned int));
-	queue.enqueueWriteBuffer(cl_triangles, CL_TRUE, 0, triangles.size() * sizeof(unsigned int), &triangles[0]);
+	cl_normals = Buffer(context, CL_MEM_READ_ONLY, theMesh.normals.size() * sizeof(cl_double3));
+	queue.enqueueWriteBuffer(cl_normals, CL_TRUE, 0, theMesh.normals.size() * sizeof(cl_double3), &theMesh.normals[0]);
+
+	cl_triangles = Buffer(context, CL_MEM_READ_ONLY, theMesh.triangles.size() * sizeof(unsigned int));
+	queue.enqueueWriteBuffer(cl_triangles, CL_TRUE, 0, theMesh.triangles.size() * sizeof(unsigned int), &theMesh.triangles[0]);
+
 
 	// create OpenCL buffer from OpenGL vertex buffer object
 	cl_vbo = BufferGL(context, CL_MEM_WRITE_ONLY, vbo);

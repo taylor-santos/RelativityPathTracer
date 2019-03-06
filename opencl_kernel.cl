@@ -3,7 +3,7 @@
 /* http://raytracey.blogspot.com */
 
 
-__constant double EPSILON = 0.0000001; /* required to compensate for limited float precision */
+__constant double EPSILON = 0.0000000001; /* required to compensate for limited float precision */
 __constant int MSAASAMPLES = 1;
 
 typedef struct Ray{
@@ -147,40 +147,32 @@ bool intersect_sphere(global const Object *objects, const int index, const Ray *
 }
 
 bool intersect_triangle(const double3 A, const double3 B, const double3 C, const Ray *ray, Hit *hit) {
-	/* https://en.wikipedia.org/wiki/M%C3%B6ller%E2%80%93Trumbore_intersection_algorithm */
+	/* 
+	https://www.scratchapixel.com/lessons/3d-basic-rendering/ray-tracing-rendering-a-triangle/moller-trumbore-ray-triangle-intersection
+	*/
+	double3 v0v1 = B - A;
+	double3 v0v2 = C - A;
+	double3 pvec = cross(ray->dir, v0v2);
+	double det = dot(v0v1, pvec);
+	if (det < EPSILON) return false;
 
-	double3 edge1 = B - A;
-	double3 edge2 = C - A;
-	double3 h = cross(ray->dir, edge2);
-	double a = dot(edge1, h);
-	if (-EPSILON < a && a < EPSILON) {
-		return false;
-	}
-	double f = 1.0 / a;
-	double3 s = ray->origin - A;
-	double2 uv;
-	uv.x = f * dot(s, h);
-	if (uv.x < 0 || uv.x > 1) {
-		return false;
-	}
-	double3 q = cross(s, edge1);
-	uv.y = f * dot(ray->dir, q);
-	if (uv.y < 0 || uv.x + uv.y > 1) {
-		return false;
-	}
-	double d = f * dot(edge2, q);
-	if (d > EPSILON) {
-		hit->dist = d;
-		hit->uv = uv;
-		hit->normal = normalize(cross(B - A, C - A));
-		return true;
-	}
-	else {
-		return false;
-	}
+	double invDet = 1 / det;
+
+	double3 tvec = ray->origin - A;
+	double u = dot(tvec, pvec) * invDet;
+	if (u < 0 || u > 1) return false;
+
+	double3 qvec = cross(tvec, v0v1);
+	double v = dot(ray->dir, qvec) * invDet;
+	if (v < 0 || u + v > 1) return false;
+
+	double t = dot(v0v2, qvec) * invDet;
+	hit->dist = t;
+	hit->uv = (double2)(u, v);
+	return true;
 }
 
-bool intersect_mesh(global const Object* objects, const int index, global const double3 *vertices, global const unsigned int *triangles, const unsigned int face_count, const Ray *ray, Hit *hit) {
+bool intersect_mesh(global const Object* objects, const int index, global const double3 *vertices, global const double3 *normals, global const unsigned int *triangles, const unsigned int face_count, const Ray *ray, Hit *hit) {
 	Ray newRay;
 	newRay.origin = transformPoint(objects[index].InvM, ray->origin);
 	newRay.dir = normalize(transformDirection(objects[index].InvM, ray->dir));
@@ -189,25 +181,33 @@ bool intersect_mesh(global const Object* objects, const int index, global const 
 	newHit.color = objects[index].color;
 	bool didHit = false;
 	for (int i = 0; i < face_count; i++) {
-		double3 A = vertices[triangles[3 * i + 0]];
-		double3 B = vertices[triangles[3 * i + 1]];
-		double3 C = vertices[triangles[3 * i + 2]];
+		double3 A = vertices[triangles[9 * i + 3 * 0]];
+		double3 B = vertices[triangles[9 * i + 3 * 1]];
+		double3 C = vertices[triangles[9 * i + 3 * 2]];
 		
 		if (intersect_triangle(A, B, C, &newRay, &newHit)) {
 			double3 objPt = newRay.origin + newRay.dir * newHit.dist;
 			double3 worldPt = transformPoint(objects[index].M, objPt);
 			newHit.dist = length(worldPt);
 			if (newHit.dist > 0.0f && newHit.dist < hit->dist) {
-				newHit.normal = normalize(applyTranspose(objects[index].InvM, newHit.normal));
+				double3 normA = normals[triangles[2 + 9 * i + 3 * 0]];
+				double3 normB = normals[triangles[2 + 9 * i + 3 * 1]];
+				double3 normC = normals[triangles[2 + 9 * i + 3 * 2]];
+				double u = newHit.uv.s0;
+				double v = newHit.uv.s1;
+				newHit.normal = (1.0 - u - v)*normA + u * normB + v * normC;
 				*hit = newHit;
 				didHit = true;
 			}
 		}
 	}
+	if (didHit) {
+		hit->normal = normalize(applyTranspose(objects[index].InvM, hit->normal));
+	}
 	return didHit;
 }
 
-bool intersect_scene(global const Object* objects, const int object_count, global const double3 *vertices, global const unsigned int *triangles, const unsigned int face_count, const Ray *ray, Hit *hit)
+bool intersect_scene(global const Object* objects, const int object_count, global const double3 *vertices, global const double3 *normals, global const unsigned int *triangles, const unsigned int face_count, const Ray *ray, Hit *hit)
 {
 	/* initialise t to a very large number,
 	so t will be guaranteed to be smaller
@@ -221,7 +221,7 @@ bool intersect_scene(global const Object* objects, const int object_count, globa
 		Hit newHit;
 		newHit.dist = inf;
 		if (i == 6) {
-			if (intersect_mesh(objects, i, vertices, triangles, face_count, ray, &newHit)) {
+			if (intersect_mesh(objects, i, vertices, normals, triangles, face_count, ray, &newHit)) {
 				if (newHit.dist > 0.0f && newHit.dist < hit->dist) {
 					*hit = newHit;
 					break;
@@ -256,8 +256,7 @@ bool intersect_scene(global const Object* objects, const int object_count, globa
 /* each ray hitting a surface will be reflected in a random direction (by randomly sampling the hemisphere above the hitpoint) */
 /* small optimisation: diffuse ray directions are calculated using cosine weighted importance sampling */
 
-float3 trace(global const Object* objects, const int object_count, global const double3 *vertices, global const unsigned int *triangles, const unsigned int face_count, const Ray* camray){
-
+float3 trace(global const Object* objects, const int object_count, global const double3 *vertices, global const double3 *normals, global const unsigned int *triangles, const unsigned int face_count, const Ray* camray){
 	float3 accum_color = (float3)(0.0f, 0.0f, 0.0f);
 	float3 mask = (float3)(1.0f, 1.0f, 1.0f);
 
@@ -265,19 +264,19 @@ float3 trace(global const Object* objects, const int object_count, global const 
 
 	/* if ray misses scene, return background colour */
 	Hit hit;
-	if (!intersect_scene(objects, object_count, vertices, triangles, face_count, camray, &hit))
+	if (!intersect_scene(objects, object_count, vertices, normals, triangles, face_count, camray, &hit))
 		return accum_color += mask * (float3)(0.15f, 0.15f, 0.25f);
 
-		/* compute the hitpoint using the ray equation */
+	/* compute the hitpoint using the ray equation */
 	double3 hitpoint = camray->origin + camray->dir * hit.dist;
 
 	/* compute the surface normal and flip it if necessary to face the incoming ray */
 	double3 normal = hit.normal;
-	double3 normal_facing = dot(normal, camray->dir) < 0.0f ? normal : normal * (-1.0f);
 
-	float3 color = (float3)((float)normal_facing.x, (float)normal_facing.y, (float)normal_facing.z);
+	float3 color = convert_float3(normal);
 	color = (color + (float3)(1, 1, 1)) / 2;
 	return color * hit.color;
+	
 }
 
 union Colour { float c; uchar4 components; };
@@ -286,6 +285,7 @@ __kernel void render_kernel(
 	global const Object* objects,
 	const int object_count,
 	global const double3 *vertices,
+	global const double3 *normals,
 	global const int *triangles,
 	const int face_count,
 	const int width,
@@ -302,7 +302,7 @@ __kernel void render_kernel(
 		for (int x = 0; x < MSAASAMPLES; x++) {
 			Ray camray = createCamRay((double)x_coord + (double)x/MSAASAMPLES, (double)y_coord + (double)y/ MSAASAMPLES, width, height);
 
-			finalcolor += trace(objects, object_count, vertices, triangles, face_count, &camray);
+			finalcolor += trace(objects, object_count, vertices, normals, triangles, face_count, &camray);
 		}
 	}
 	finalcolor = finalcolor / (MSAASAMPLES*MSAASAMPLES);
