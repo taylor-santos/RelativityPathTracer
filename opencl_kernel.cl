@@ -27,6 +27,13 @@ typedef struct Hit {
 	float3 color;
 } Hit;
 
+typedef struct Octree {
+	double3 min;
+	double3 max;
+	int children[8];
+	int neighbors[8];
+} Octree;
+
 static float get_random(unsigned int *seed0, unsigned int *seed1) {
 
 	/* hash the seeds using bitwise AND operations and bitshifts */
@@ -84,6 +91,49 @@ double3 transformDirection(const double4 M[4], const double3 v) {
 
 double3 applyTranspose(const double4 M[4], const double3 v) {
 	return M[0].xyz * v.xxx + M[1].xyz * v.yyy + M[2].xyz * v.zzz;
+}
+
+bool intersect_AABB(const double3 bounds[2], const Ray *ray, double2 *d, int *closeSide, int *farSide) {
+	double3 origin = ray->origin;
+	double3 dir = ray->dir;
+	double3 inv_dir = 1.0 / dir;
+	int sign[3] = {
+		inv_dir.x < 0 ? 1 : 0,
+		inv_dir.y < 0 ? 1 : 0,
+		inv_dir.z < 0 ? 1 : 0
+	};
+	d->s0 = (bounds[sign[0]].x - origin.x) * inv_dir.x;
+	d->s1 = (bounds[1 - sign[0]].x - origin.x) * inv_dir.x;
+	*closeSide = 2 + sign[0];
+	*farSide = 3 - sign[0];
+	double tymin = (bounds[sign[1]].y - origin.y) * inv_dir.y;
+	double tymax = (bounds[1 - sign[1]].y - origin.y) * inv_dir.y;
+	if ((d->s0 > tymax) || (tymin > d->s1)) {
+		return false;
+	}
+	if (tymin > d->s0) {
+		d->s0 = tymin;
+		*closeSide = 4 + sign[1];
+	}
+	if (tymax < d->s1) {
+		d->s1 = tymax;
+		*farSide = 5 - sign[1];
+	}
+	double tzmin = (bounds[sign[2]].z - origin.z) * inv_dir.z;
+	double tzmax = (bounds[1 - sign[2]].z - origin.z) * inv_dir.z;
+	if ((d->s0 > tzmax) || (tzmin > d->s1)) {
+		return false;
+	}
+	if (tzmin > d->s0) {
+		d->s0 = tzmin;
+		*closeSide = sign[2];
+	}
+	if (tzmax < d->s1) {
+		d->s1 = tzmax;
+		*farSide = 1 - sign[2];
+	}
+
+	return d->s1 > 0;
 }
 
 bool intersect_cube(global const Object *objects, int index, const Ray *ray, Hit *hit) {
@@ -172,43 +222,70 @@ bool intersect_triangle(const double3 A, const double3 B, const double3 C, const
 	return true;
 }
 
-bool intersect_mesh(global const Object* objects, const int index, global const double3 *vertices, global const double3 *normals, global const unsigned int *triangles, const unsigned int face_count, const Ray *ray, Hit *hit) {
+bool intersect_mesh(
+	global const Object* objects,
+	const int index,
+	global const double3 *vertices,
+	global const double3 *normals,
+	global const unsigned int *triangles,
+	const unsigned int face_count,
+	global const Octree *octrees,
+	const Ray *ray,
+	Hit *hit
+) {
 	Ray newRay;
 	newRay.origin = transformPoint(objects[index].InvM, ray->origin);
 	newRay.dir = normalize(transformDirection(objects[index].InvM, ray->dir));
-	Hit newHit;
 
-	newHit.color = objects[index].color;
-	bool didHit = false;
-	for (int i = 0; i < face_count; i++) {
-		double3 A = vertices[triangles[9 * i + 3 * 0]];
-		double3 B = vertices[triangles[9 * i + 3 * 1]];
-		double3 C = vertices[triangles[9 * i + 3 * 2]];
-		
-		if (intersect_triangle(A, B, C, &newRay, &newHit)) {
-			double3 objPt = newRay.origin + newRay.dir * newHit.dist;
-			double3 worldPt = transformPoint(objects[index].M, objPt);
-			newHit.dist = length(worldPt);
-			if (newHit.dist > 0.0f && newHit.dist < hit->dist) {
-				double3 normA = normals[triangles[2 + 9 * i + 3 * 0]];
-				double3 normB = normals[triangles[2 + 9 * i + 3 * 1]];
-				double3 normC = normals[triangles[2 + 9 * i + 3 * 2]];
-				double u = newHit.uv.s0;
-				double v = newHit.uv.s1;
-				newHit.normal = (1.0 - u - v)*normA + u * normB + v * normC;
-				*hit = newHit;
-				didHit = true;
+	double3 bounds[2] = { octrees[0].min, octrees[0].max };
+	double2 d;
+	int closeSide, farSide;
+
+	if (intersect_AABB(bounds, &newRay, &d, &closeSide, &farSide)) {
+		Hit newHit;
+
+		newHit.color = objects[index].color;
+		bool didHit = false;
+		for (int i = 0; i < face_count; i++) {
+			double3 A = vertices[triangles[9 * i + 3 * 0]];
+			double3 B = vertices[triangles[9 * i + 3 * 1]];
+			double3 C = vertices[triangles[9 * i + 3 * 2]];
+
+			if (intersect_triangle(A, B, C, &newRay, &newHit)) {
+				double3 objPt = newRay.origin + newRay.dir * newHit.dist;
+				double3 worldPt = transformPoint(objects[index].M, objPt);
+				newHit.dist = length(worldPt);
+				if (newHit.dist > 0.0f && newHit.dist < hit->dist) {
+					double3 normA = normals[triangles[2 + 9 * i + 3 * 0]];
+					double3 normB = normals[triangles[2 + 9 * i + 3 * 1]];
+					double3 normC = normals[triangles[2 + 9 * i + 3 * 2]];
+					double u = newHit.uv.s0;
+					double v = newHit.uv.s1;
+					newHit.normal = (1.0 - u - v)*normA + u * normB + v * normC;
+					*hit = newHit;
+					didHit = true;
+				}
 			}
 		}
+		if (didHit) {
+			hit->normal = normalize(applyTranspose(objects[index].InvM, hit->normal));
+			return true;
+		}
 	}
-	if (didHit) {
-		hit->normal = normalize(applyTranspose(objects[index].InvM, hit->normal));
-	}
-	return didHit;
+	return false;
 }
 
-bool intersect_scene(global const Object* objects, const int object_count, global const double3 *vertices, global const double3 *normals, global const unsigned int *triangles, const unsigned int face_count, const Ray *ray, Hit *hit)
-{
+bool intersect_scene(
+	global const Object* objects,
+	const int object_count,
+	global const double3 *vertices,
+	global const double3 *normals,
+	global const unsigned int *triangles,
+	const unsigned int face_count,
+	global const Octree *octrees,
+	const Ray *ray,
+	Hit *hit
+) {
 	/* initialise t to a very large number,
 	so t will be guaranteed to be smaller
 	when a hit with the scene occurs */
@@ -221,7 +298,7 @@ bool intersect_scene(global const Object* objects, const int object_count, globa
 		Hit newHit;
 		newHit.dist = inf;
 		if (i == 6) {
-			if (intersect_mesh(objects, i, vertices, normals, triangles, face_count, ray, &newHit)) {
+			if (intersect_mesh(objects, i, vertices, normals, triangles, face_count, octrees, ray, &newHit)) {
 				if (newHit.dist > 0.0f && newHit.dist < hit->dist) {
 					*hit = newHit;
 					break;
@@ -256,7 +333,16 @@ bool intersect_scene(global const Object* objects, const int object_count, globa
 /* each ray hitting a surface will be reflected in a random direction (by randomly sampling the hemisphere above the hitpoint) */
 /* small optimisation: diffuse ray directions are calculated using cosine weighted importance sampling */
 
-float3 trace(global const Object* objects, const int object_count, global const double3 *vertices, global const double3 *normals, global const unsigned int *triangles, const unsigned int face_count, const Ray* camray){
+float3 trace(
+	global const Object* objects,
+	const int object_count,
+	global const double3 *vertices,
+	global const double3 *normals,
+	global const unsigned int *triangles,
+	const unsigned int face_count,
+	global const Octree *octrees,
+	const Ray* camray
+) {
 	float3 accum_color = (float3)(0.0f, 0.0f, 0.0f);
 	float3 mask = (float3)(1.0f, 1.0f, 1.0f);
 
@@ -264,7 +350,7 @@ float3 trace(global const Object* objects, const int object_count, global const 
 
 	/* if ray misses scene, return background colour */
 	Hit hit;
-	if (!intersect_scene(objects, object_count, vertices, normals, triangles, face_count, camray, &hit))
+	if (!intersect_scene(objects, object_count, vertices, normals, triangles, face_count, octrees, camray, &hit))
 		return accum_color += mask * (float3)(0.15f, 0.15f, 0.25f);
 
 	/* compute the hitpoint using the ray equation */
@@ -288,6 +374,7 @@ __kernel void render_kernel(
 	global const double3 *normals,
 	global const int *triangles,
 	const int face_count,
+	global const Octree *octrees,
 	const int width,
 	const int height,
 	__global float3* output
@@ -302,7 +389,7 @@ __kernel void render_kernel(
 		for (int x = 0; x < MSAASAMPLES; x++) {
 			Ray camray = createCamRay((double)x_coord + (double)x/MSAASAMPLES, (double)y_coord + (double)y/ MSAASAMPLES, width, height);
 
-			finalcolor += trace(objects, object_count, vertices, normals, triangles, face_count, &camray);
+			finalcolor += trace(objects, object_count, vertices, normals, triangles, face_count, octrees, &camray);
 		}
 	}
 	finalcolor = finalcolor / (MSAASAMPLES*MSAASAMPLES);

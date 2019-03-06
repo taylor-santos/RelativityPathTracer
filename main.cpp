@@ -32,6 +32,7 @@ Buffer cl_vertices;
 Buffer cl_normals;
 Buffer cl_uvs;
 Buffer cl_triangles;
+Buffer cl_octrees;
 BufferGL cl_vbo;
 vector<Memory> cl_vbos;
 
@@ -64,8 +65,8 @@ struct Octree
 {
 	cl_double3 min;
 	cl_double3 max;
-	int children[8];
-	int neighbors[8];
+	int children[8]  = { -1, -1, -1, -1, -1, -1, -1, -1 };
+	int neighbors[8] = { -1, -1, -1, -1, -1, -1, -1, -1 };
 };
 
 struct Mesh
@@ -74,6 +75,7 @@ struct Mesh
 	std::vector<unsigned int> triangles;
 	std::vector<cl_double2> uvs;
 	std::vector<cl_double3> normals;
+	std::vector<Octree> octree;
 };
 
 Mesh theMesh;
@@ -247,6 +249,22 @@ cl_double3 cross(const cl_double3 a, const cl_double3 b) {
 	);
 }
 
+cl_double3 elementwise_min(const cl_double3 a, const cl_double3 b) {
+	return double3(
+		min(a.x, b.x),
+		min(a.y, b.y),
+		min(a.z, b.z)
+	);
+}
+
+cl_double3 elementwise_max(const cl_double3 a, const cl_double3 b) {
+	return double3(
+		max(a.x, b.x),
+		max(a.y, b.y),
+		max(a.z, b.z)
+	);
+}
+
 bool OBJReader(std::string path, Mesh &mesh) {
 	if (path.substr(path.size() - 4, 4) != ".obj") return false;
 	ifstream file(path);
@@ -324,6 +342,15 @@ bool OBJReader(std::string path, Mesh &mesh) {
 		}
 		lineno++;
 	}
+	Octree octree;
+	octree.min = mesh.vertices[mesh.triangles[0]];
+	octree.max = mesh.vertices[mesh.triangles[0]];
+	for (int i = 3; i < mesh.triangles.size() / 3; i++) {
+		cl_double3 vert = mesh.vertices[mesh.triangles[3 * i]];
+		octree.min = elementwise_min(octree.min, vert);
+		octree.max = elementwise_max(octree.max, vert);
+	}
+	mesh.octree.push_back(octree);
 	return true;
 }
 
@@ -467,9 +494,10 @@ void initCLKernel(){
 	kernel.setArg(3, cl_normals);
 	kernel.setArg(4, cl_triangles);
 	kernel.setArg(5, (unsigned int)(theMesh.triangles.size()/9));
-	kernel.setArg(6, window_width);
-	kernel.setArg(7, window_height);
-	kernel.setArg(8, cl_vbo);
+	kernel.setArg(6, cl_octrees);
+	kernel.setArg(7, window_width);
+	kernel.setArg(8, window_height);
+	kernel.setArg(9, cl_vbo);
 }
 
 void runKernel(){
@@ -533,7 +561,7 @@ void render(){
 		initCLKernel();
 	}
 
-	TRS(&cpu_objects[6], double3(0, 0, 12), framenumber/100.0, double3(0, 1, 0), double3(1, 1, 1));
+	TRS(&cpu_objects[6], double3(0, 0, 12), framenumber/100.0, double3(0, 1, 0), double3(0.1, 0.1, 0.1));
 
 	queue.enqueueWriteBuffer(cl_objects, CL_TRUE, 0, object_count * sizeof(Object), cpu_objects);
 
@@ -580,6 +608,9 @@ void main(int argc, char** argv){
 
 	cl_triangles = Buffer(context, CL_MEM_READ_ONLY, theMesh.triangles.size() * sizeof(unsigned int));
 	queue.enqueueWriteBuffer(cl_triangles, CL_TRUE, 0, theMesh.triangles.size() * sizeof(unsigned int), &theMesh.triangles[0]);
+
+	cl_octrees = Buffer(context, CL_MEM_READ_ONLY, theMesh.octree.size() * sizeof(Octree));
+	queue.enqueueWriteBuffer(cl_octrees, CL_TRUE, 0, theMesh.octree.size() * sizeof(Octree), &theMesh.octree[0]);
 
 
 	// create OpenCL buffer from OpenGL vertex buffer object
