@@ -5,6 +5,7 @@
 
 __constant double EPSILON = 0.0000000001; /* required to compensate for limited float precision */
 __constant int MSAASAMPLES = 1;
+#define MAX_OCTREE_DEPTH 8;
 
 typedef struct Ray{
 	double3 origin;
@@ -35,24 +36,6 @@ typedef struct Octree {
 	int children[8];
 	int neighbors[6];
 } Octree;
-
-static float get_random(unsigned int *seed0, unsigned int *seed1) {
-
-	/* hash the seeds using bitwise AND operations and bitshifts */
-	*seed0 = 36969 * ((*seed0) & 65535) + ((*seed0) >> 16);
-	*seed1 = 18000 * ((*seed1) & 65535) + ((*seed1) >> 16);
-
-	unsigned int ires = ((*seed0) << 16) + (*seed1);
-
-	/* use union struct to convert int to float */
-	union {
-		float f;
-		unsigned int ui;
-	} res;
-
-	res.ui = (ires & 0x007fffff) | 0x40000000;  /* bitwise AND, bitwise OR */
-	return (res.f - 2.0f) / 2.0f;
-}
 
 Ray createCamRay(const double x_coord, const double y_coord, const int width, const int height){
 
@@ -91,8 +74,36 @@ double3 transformDirection(const double4 M[4], const double3 v) {
 	);
 }
 
+
 double3 applyTranspose(const double4 M[4], const double3 v) {
 	return M[0].xyz * v.xxx + M[1].xyz * v.yyy + M[2].xyz * v.zzz;
+}
+
+
+bool intersect_triangle(const double3 A, const double3 B, const double3 C, const Ray *ray, Hit *hit) {
+	/*
+	https://www.scratchapixel.com/lessons/3d-basic-rendering/ray-tracing-rendering-a-triangle/moller-trumbore-ray-triangle-intersection
+    */
+	double3 v0v1 = B - A;
+	double3 v0v2 = C - A;
+	double3 pvec = cross(ray->dir, v0v2);
+	double det = dot(v0v1, pvec);
+	if (det < EPSILON) return false;
+
+	double invDet = 1 / det;
+
+	double3 tvec = ray->origin - A;
+	double u = dot(tvec, pvec) * invDet;
+	if (u < 0 || u > 1) return false;
+
+	double3 qvec = cross(tvec, v0v1);
+	double v = dot(ray->dir, qvec) * invDet;
+	if (v < 0 || u + v > 1) return false;
+
+	double t = dot(v0v2, qvec) * invDet;
+	hit->dist = t;
+	hit->uv = (double2)(u, v);
+	return true;
 }
 
 bool intersect_AABB(const double3 bounds[2], const Ray *ray, double2 *d, int *closeSide, int *farSide) {
@@ -136,6 +147,34 @@ bool intersect_AABB(const double3 bounds[2], const Ray *ray, double2 *d, int *cl
 	}
 
 	return d->s1 > 0;
+}
+
+bool intersect_Octree(global const Octree *octrees, const Ray *ray, Hit *hit) {
+	int octreeStack[8];
+	int childStack[8];
+	int stackIndex = 0;
+	octreeStack[stackIndex] = 0;
+	childStack[stackIndex] = 0;
+	Octree curr = octrees[0];
+	while (1) {
+		if (curr.children[0] != -1) {
+			stackIndex++;
+			octreeStack[stackIndex] = curr.children[0];
+			childStack[stackIndex] = 0;
+			curr = octrees[octreeStack[stackIndex]];
+		}
+		else {
+			childStack[stackIndex]++;
+			while (childStack[stackIndex] >= 8) {
+				stackIndex--;
+				if (stackIndex < 0) break;
+				childStack[stackIndex]++;
+			}
+			if (stackIndex < 0) break;
+			curr = octrees[octrees[octreeStack[stackIndex]].children[childStack[stackIndex]]];
+		}
+	}
+	return false;
 }
 
 bool intersect_cube(global const Object *objects, int index, const Ray *ray, Hit *hit) {
@@ -198,32 +237,6 @@ bool intersect_sphere(global const Object *objects, const int index, const Ray *
 	return true;
 }
 
-bool intersect_triangle(const double3 A, const double3 B, const double3 C, const Ray *ray, Hit *hit) {
-	/* 
-	https://www.scratchapixel.com/lessons/3d-basic-rendering/ray-tracing-rendering-a-triangle/moller-trumbore-ray-triangle-intersection
-	*/
-	double3 v0v1 = B - A;
-	double3 v0v2 = C - A;
-	double3 pvec = cross(ray->dir, v0v2);
-	double det = dot(v0v1, pvec);
-	if (det < EPSILON) return false;
-
-	double invDet = 1 / det;
-
-	double3 tvec = ray->origin - A;
-	double u = dot(tvec, pvec) * invDet;
-	if (u < 0 || u > 1) return false;
-
-	double3 qvec = cross(tvec, v0v1);
-	double v = dot(ray->dir, qvec) * invDet;
-	if (v < 0 || u + v > 1) return false;
-
-	double t = dot(v0v2, qvec) * invDet;
-	hit->dist = t;
-	hit->uv = (double2)(u, v);
-	return true;
-}
-
 bool intersect_mesh(
 	global const Object* objects,
 	const int index,
@@ -240,13 +253,22 @@ bool intersect_mesh(
 	newRay.origin = transformPoint(objects[index].InvM, ray->origin);
 	newRay.dir = normalize(transformDirection(objects[index].InvM, ray->dir));
 
+	return intersect_Octree(octrees, &newRay, hit);
+
 	double3 bounds[2] = { octrees[0].min, octrees[0].max };
 	double2 d;
 	int closeSide, farSide;
 
 	if (intersect_AABB(bounds, &newRay, &d, &closeSide, &farSide)) {
-		Hit newHit;
+		double3 extents = octrees[0].max - octrees[0].min;
+		double3 u1 = (newRay.origin + d.s0 * newRay.dir - bounds[0]) / extents;
+		double3 u2 = (newRay.origin + d.s1 * newRay.dir - bounds[0]) / extents;
+		
+		
 
+
+		
+		Hit newHit;
 		newHit.color = objects[index].color;
 		bool didHit = false;
 		for (int i = octrees[0].trisIndex; i < octrees[0].trisIndex + octrees[0].trisCount; i++) {
