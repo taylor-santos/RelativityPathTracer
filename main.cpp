@@ -468,15 +468,15 @@ bool AABBTriangleIntersection(Mesh const& mesh, int octreeIndex, int triIndex) {
 }
 
 void Subdivide(Mesh &mesh, int octreeIndex, int minTris, int depth) {
-	if (depth <= 0 || mesh.octree[octreeIndex].trisCount <= minTris) return;
+	if (depth <= 0/* || mesh.octree[octreeIndex].trisCount <= minTris*/) return;
 	cl_double3 extents = mesh.octree[octreeIndex].max - mesh.octree[octreeIndex].min;
 	cl_double3 half_extents = extents / 2;
 	cl_double3 ex = double3(half_extents.x, 0, 0);
 	cl_double3 ey = double3(0, half_extents.y, 0);
 	cl_double3 ez = double3(0, 0, half_extents.z);
-	for (int z = 0; z < 2; z++) {
+	for (int x = 0; x < 2; x++) {
 		for (int y = 0; y < 2; y++) {
-			for (int x = 0; x < 2; x++) {
+			for (int z = 0; z < 2; z++) {
 				Octree child;
 				child.min = mesh.octree[octreeIndex].min + ex * x + ey * y + ez * z;
 				child.max = child.min + half_extents;
@@ -485,7 +485,7 @@ void Subdivide(Mesh &mesh, int octreeIndex, int minTris, int depth) {
 				child.trisIndex = mesh.octreeTris.size();
 				child.trisCount = 0;
 				
-				mesh.octree[octreeIndex].children[4 * z + 2 * y + x] = mesh.octree.size();
+				mesh.octree[octreeIndex].children[z + 2 * y + 4 * x] = mesh.octree.size();
 				mesh.octree.push_back(child);
 				for (int tri = trisStart; tri < trisStart + trisCount; tri++) {
 					int triIndex = mesh.octreeTris[tri];
@@ -567,7 +567,7 @@ void Mesh::GenerateOctree() {
 		newOctree.trisCount++;
 	}
 	octree.push_back(newOctree);
-	Subdivide(*this, 0, 7, 6);
+	Subdivide(*this, 0, 20, 4);
 }
 
 bool OBJReader(std::string path, Mesh &mesh) {
@@ -864,7 +864,7 @@ void render(){
 		initCLKernel();
 	}
 
-	TRS(&cpu_objects[6], double3(0, 0, 12), framenumber/10.0, double3(1, 1, 0), double3(1, 1, 1));
+	TRS(&cpu_objects[6], double3(0, 0, 12), ms / 1000.0, double3(1, 1, 0), double3(1, 1, 1));
 
 	queue.enqueueWriteBuffer(cl_objects, CL_TRUE, 0, object_count * sizeof(Object), cpu_objects);
 

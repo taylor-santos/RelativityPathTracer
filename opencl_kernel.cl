@@ -79,6 +79,150 @@ double3 applyTranspose(const double4 M[4], const double3 v) {
 	return M[0].xyz * v.xxx + M[1].xyz * v.yyy + M[2].xyz * v.zzz;
 }
 
+private int getChildIndex(int side, double3 *uv) {
+	switch (side) {
+	case 0:
+		if (uv->x < 0.5) {
+			uv->x *= 2;
+			if (uv->y < 0.5) {
+				uv->y *= 2;
+				return 0;
+			}
+			else {
+				uv->y = 2 * uv->y - 1;
+				return 2;
+			}
+		}
+		else {
+			uv->x = 2 * uv->x - 1;
+			if (uv->y < 0.5) {
+				uv->y *= 2;
+				return 4;
+			}
+			else {
+				uv->y = 2 * uv->y - 1;
+				return 6;
+			}
+		}
+	case 1:
+		if (uv->x < 0.5) {
+			uv->x *= 2;
+			if (uv->y < 0.5) {
+				uv->y *= 2;
+				return 1;
+			}
+			else {
+				uv->y = 2 * uv->y - 1;
+				return 3;
+			}
+		}
+		else {
+			uv->x = 2 * uv->x - 1;
+			if (uv->y < 0.5) {
+				uv->y *= 2;
+				return 5;
+			}
+			else {
+				uv->y = 2 * uv->y - 1;
+				return 7;
+			}
+		}
+	case 2:
+		if (uv->y < 0.5) {
+			uv->y *= 2;
+			if (uv->z < 0.5) {
+				uv->z *= 2;
+				return 0;
+			}
+			else {
+				uv->z = 2 * uv->z - 1;
+				return 1;
+			}
+		}
+		else {
+			uv->y = 2 * uv->y - 1;
+			if (uv->z < 0.5) {
+				uv->z *= 2;
+				return 2;
+			}
+			else {
+				uv->z = 2 * uv->z - 1;
+				return 3;
+			}
+		}
+	case 3:
+		if (uv->y < 0.5) {
+			uv->y *= 2;
+			if (uv->z < 0.5) {
+				uv->z *= 2;
+				return 4;
+			}
+			else {
+				uv->z = 2 * uv->z - 1;
+				return 5;
+			}
+		}
+		else {
+			uv->y = 2 * uv->y - 1;
+			if (uv->z < 0.5) {
+				uv->z *= 2;
+				return 6;
+			}
+			else {
+				uv->z = 2 * uv->z - 1;
+				return 7;
+			}
+		}
+	case 4:
+		if (uv->x < 0.5) {
+			uv->x *= 2;
+			if (uv->z < 0.5) {
+				uv->z *= 2;
+				return 0;
+			}
+			else {
+				uv->z = 2 * uv->z - 1;
+				return 1;
+			}
+		}
+		else {
+			uv->x = 2 * uv->x - 1;
+			if (uv->z < 0.5) {
+				uv->z *= 2;
+				return 4;
+			}
+			else {
+				uv->z = 2 * uv->z - 1;
+				return 5;
+			}
+		}
+	case 5:
+		if (uv->x < 0.5) {
+			uv->x *= 2;
+			if (uv->z < 0.5) {
+				uv->z *= 2;
+				return 2;
+			}
+			else {
+				uv->z = 2 * uv->z - 1;
+				return 3;
+			}
+		}
+		else {
+			uv->x = 2 * uv->x - 1;
+			if (uv->z < 0.5) {
+				uv->z *= 2;
+				return 6;
+			}
+			else {
+				uv->z = 2 * uv->z - 1;
+				return 7;
+			}
+		}
+	default:
+		return -1;
+	}
+}
 
 bool intersect_triangle(const double3 A, const double3 B, const double3 C, const Ray *ray, Hit *hit) {
 	/*
@@ -149,7 +293,34 @@ bool intersect_AABB(const double3 bounds[2], const Ray *ray, double2 *d, int *cl
 	return d->s1 > 0;
 }
 
-#define STACK_DEPTH 16
+int getOppositeBoxSide(const double3 scaledDir, const int closeSide, double3 *uv) {
+	double3 inv_dir = 1.0 / scaledDir;
+	int sign[3] = { scaledDir.x < 0, scaledDir.y < 0, scaledDir.z < 0 };
+	double dx = (1 - sign[0] - uv->x) * inv_dir.x;
+	double dy = (1 - sign[1] - uv->y) * inv_dir.y;
+	double dz = (1 - sign[2] - uv->z) * inv_dir.z;
+	if (dx < dy) {
+		if (dx < dz) { /* dx < dz && dx < dy */
+			*uv += scaledDir * dx;
+			return 3 - sign[0];
+		}
+		else { /* dz <= dx < dy */
+			*uv += scaledDir * dz;
+			return 1 - sign[2];
+		}
+	}
+	else { /* dy <= dx */
+		if (dy < dz) {
+			*uv += scaledDir * dy;
+			return 5 - sign[1];
+		}
+		else { /* dz <= dy <= dx */
+			*uv += scaledDir * dz;
+			return 1 - sign[2];
+		}
+	}
+}
+
 bool intersect_Octree(
 	global const double3 *vertices,
 	global const double3 *normals,
@@ -157,73 +328,69 @@ bool intersect_Octree(
 	global const Octree *octrees,
 	global const int *octreeTris,
 	const Ray *ray,
-	Hit *hit) {
-	const double3 bounds[2] = { octrees[0].min, octrees[0].max };
+	Hit *hit
+) {
+	int currOctreeIndex = 0;
 	double2 d;
 	int closeSide, farSide;
+	double3 bounds[2] = {
+		octrees[currOctreeIndex].min,
+		octrees[currOctreeIndex].max
+	};
+	int count = 0;
+	bool didHit = false;
 	if (!intersect_AABB(bounds, ray, &d, &closeSide, &farSide)) {
 		return false;
 	}
-	int octreeStack[STACK_DEPTH];
-	int childStack[STACK_DEPTH];
-	int stackIndex = 0;
-	octreeStack[stackIndex] = 0;
-	childStack[stackIndex] = 0;
-	bool didHit = false;
-	while (1) {
-		const double3 bounds[2] = { octrees[octreeStack[stackIndex]].min, octrees[octreeStack[stackIndex]].max };
-		double2 d;
-		int closeSide, farSide;
-		if (stackIndex < STACK_DEPTH - 1
-			&& octrees[octreeStack[stackIndex]].children[0] != -1
-			&& intersect_AABB(bounds, ray, &d, &closeSide, &farSide)
+	double3 uv = ray->origin + ray->dir * d.s0;
+	for (int step = 0; step < 1000 && currOctreeIndex != -1; step++) {
+		double3 extents = octrees[currOctreeIndex].max - octrees[currOctreeIndex].min;
+		uv = (uv - octrees[currOctreeIndex].min) / extents;
+		while (octrees[currOctreeIndex].children[0] != -1) {
+			int childIndex = getChildIndex(closeSide, &uv);
+			currOctreeIndex = octrees[currOctreeIndex].children[childIndex];
+		}
+		/*
+		for (
+			int i = octrees[currOctreeIndex].trisIndex;
+			i < octrees[currOctreeIndex].trisIndex + octrees[currOctreeIndex].trisCount;
+			i++
 		) {
-			stackIndex++;
-			childStack[stackIndex] = 0;
-
-		} else {
-			if (intersect_AABB(bounds, ray, &d, &closeSide, &farSide)) {
-				for (
-					int i = octrees[octreeStack[stackIndex]].trisIndex;
-					i < octrees[octreeStack[stackIndex]].trisIndex + octrees[octreeStack[stackIndex]].trisCount;
-					i++
-				) {
-					int tri = octreeTris[i];
-					double3 A = vertices[triangles[9 * tri + 3 * 0]];
-					double3 B = vertices[triangles[9 * tri + 3 * 1]];
-					double3 C = vertices[triangles[9 * tri + 3 * 2]];
-					Hit newHit;
-					if (intersect_triangle(A, B, C, ray, &newHit)) {
-						if (newHit.dist < hit->dist) {
-							double3 normA = normals[triangles[2 + 9 * tri + 3 * 0]];
-							double3 normB = normals[triangles[2 + 9 * tri + 3 * 1]];
-							double3 normC = normals[triangles[2 + 9 * tri + 3 * 2]];
-							double u = newHit.uv.s0;
-							double v = newHit.uv.s1;
-							newHit.normal = (1.0 - u - v)*normA + u * normB + v * normC;
-							*hit = newHit;
-							didHit = true;
-						}
-					}
+			int tri = octreeTris[i];
+			double3 A = vertices[triangles[9 * tri + 3 * 0]];
+			double3 B = vertices[triangles[9 * tri + 3 * 1]];
+			double3 C = vertices[triangles[9 * tri + 3 * 2]];
+			Hit newHit;
+			if (intersect_triangle(A, B, C, ray, &newHit)) {
+				if (newHit.dist > 0.0f && newHit.dist < hit->dist) {
+					double3 normA = normals[triangles[2 + 9 * tri + 3 * 0]];
+					double3 normB = normals[triangles[2 + 9 * tri + 3 * 1]];
+					double3 normC = normals[triangles[2 + 9 * tri + 3 * 2]];
+					double u = newHit.uv.s0;
+					double v = newHit.uv.s1;
+					newHit.normal = (1.0 - u - v)*normA + u * normB + v * normC;
+					*hit = newHit;
+					return true;
+					didHit = true;
 				}
 			}
-			
-			childStack[stackIndex]++;
-			while (childStack[stackIndex] == 8) {
-				stackIndex--;
-				if (stackIndex < 0) break;
-				childStack[stackIndex]++;
-			}
-			if (stackIndex < 0) break;
 		}
-		if (stackIndex == 0) {
-			octreeStack[0] = octrees[0].children[childStack[0]];
-		}
-		else {
-			octreeStack[stackIndex] = octrees[octreeStack[stackIndex - 1]].children[childStack[stackIndex]];
-		}
+		*/
+		count += octrees[currOctreeIndex].trisCount;
+		extents = octrees[currOctreeIndex].max - octrees[currOctreeIndex].min;
+		double3 scaledDir = ray->dir / extents;
+		farSide = getOppositeBoxSide(scaledDir, closeSide, &uv);
+		closeSide = farSide - 2 * (farSide % 2) + 1;
+		uv = octrees[currOctreeIndex].min + uv * extents;
+		currOctreeIndex = octrees[currOctreeIndex].neighbors[farSide];
 	}
-	return didHit;
+	if (count > 0) {
+		hit->dist = 0.001;
+		hit->normal = (double3)((double)count / (count + 1), 0, 0);
+		hit->color = (float3)(1, 1, 1);
+		return true;
+	}
+	return false;
 }
 
 bool intersect_cube(global const Object *objects, int index, const Ray *ray, Hit *hit) {
