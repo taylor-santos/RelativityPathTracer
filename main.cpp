@@ -9,6 +9,7 @@
 #include <Windows.h>
 #include "gl_interop.h"
 #include <CL\cl.hpp>
+#include <chrono>
 
 // TODO
 // cleanup()
@@ -19,6 +20,7 @@ using namespace cl;
 
 const int object_count = 9;
 
+std::chrono::time_point<std::chrono::high_resolution_clock> clock_start, clock_end;
 
 // OpenCL objects
 Device device;
@@ -565,7 +567,7 @@ void Mesh::GenerateOctree() {
 		newOctree.trisCount++;
 	}
 	octree.push_back(newOctree);
-	Subdivide(*this, 0, 100, 1);
+	Subdivide(*this, 0, 7, 6);
 }
 
 bool OBJReader(std::string path, Mesh &mesh) {
@@ -836,7 +838,12 @@ unsigned int WangHash(unsigned int a) {
 
 
 void render(){
+	
 	framenumber++;
+
+	clock_end = std::chrono::high_resolution_clock::now();
+	int ms = std::chrono::duration_cast<std::chrono::milliseconds>(clock_end - clock_start).count();
+	std::cout << 1000.0 * framenumber / ms << " fps \t" << ms / 1000.0 << "s" << std::endl;
 
 	int new_window_width = glutGet(GLUT_WINDOW_WIDTH),
 	    new_window_height = glutGet(GLUT_WINDOW_HEIGHT);
@@ -866,6 +873,7 @@ void render(){
 	runKernel();
 
 	drawGL();
+
 }
 
 void cleanUp(){
@@ -918,6 +926,8 @@ void main(int argc, char** argv){
 
 	// intitialise the kernel
 	initCLKernel();
+
+	clock_start = std::chrono::high_resolution_clock::now();
 
 	// start rendering continuously
 	glutMainLoop();
