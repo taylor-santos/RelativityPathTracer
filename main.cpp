@@ -468,7 +468,7 @@ bool AABBTriangleIntersection(Mesh const& mesh, int octreeIndex, int triIndex) {
 }
 
 void Subdivide(Mesh &mesh, int octreeIndex, int minTris, int depth) {
-	if (depth <= 0/* || mesh.octree[octreeIndex].trisCount <= minTris*/) return;
+	if (depth <= 0 || mesh.octree[octreeIndex].trisCount <= minTris) return;
 	cl_double3 extents = mesh.octree[octreeIndex].max - mesh.octree[octreeIndex].min;
 	cl_double3 half_extents = extents / 2;
 	cl_double3 ex = double3(half_extents.x, 0, 0);
@@ -497,54 +497,38 @@ void Subdivide(Mesh &mesh, int octreeIndex, int minTris, int depth) {
 			}
 		}
 	}
-	mesh.octree[mesh.octree[octreeIndex].children[0]].neighbors[0] = mesh.octree[octreeIndex].neighbors[0];
-	mesh.octree[mesh.octree[octreeIndex].children[0]].neighbors[1] = mesh.octree[octreeIndex].children[1];
-	mesh.octree[mesh.octree[octreeIndex].children[0]].neighbors[2] = mesh.octree[octreeIndex].neighbors[1];
-	mesh.octree[mesh.octree[octreeIndex].children[0]].neighbors[3] = mesh.octree[octreeIndex].children[4];
-	mesh.octree[mesh.octree[octreeIndex].children[0]].neighbors[4] = mesh.octree[octreeIndex].neighbors[5];
-	mesh.octree[mesh.octree[octreeIndex].children[0]].neighbors[5] = mesh.octree[octreeIndex].children[2];
-	mesh.octree[mesh.octree[octreeIndex].children[1]].neighbors[0] = mesh.octree[octreeIndex].children[0];
-	mesh.octree[mesh.octree[octreeIndex].children[1]].neighbors[1] = mesh.octree[octreeIndex].neighbors[1];
-	mesh.octree[mesh.octree[octreeIndex].children[1]].neighbors[2] = mesh.octree[octreeIndex].neighbors[2];
-	mesh.octree[mesh.octree[octreeIndex].children[1]].neighbors[3] = mesh.octree[octreeIndex].children[5];
-	mesh.octree[mesh.octree[octreeIndex].children[1]].neighbors[4] = mesh.octree[octreeIndex].neighbors[5];
-	mesh.octree[mesh.octree[octreeIndex].children[1]].neighbors[5] = mesh.octree[octreeIndex].children[3];
-	mesh.octree[mesh.octree[octreeIndex].children[2]].neighbors[0] = mesh.octree[octreeIndex].neighbors[0];
-	mesh.octree[mesh.octree[octreeIndex].children[2]].neighbors[1] = mesh.octree[octreeIndex].children[3];
-	mesh.octree[mesh.octree[octreeIndex].children[2]].neighbors[2] = mesh.octree[octreeIndex].neighbors[2];
-	mesh.octree[mesh.octree[octreeIndex].children[2]].neighbors[3] = mesh.octree[octreeIndex].children[6];
-	mesh.octree[mesh.octree[octreeIndex].children[2]].neighbors[4] = mesh.octree[octreeIndex].children[0];
-	mesh.octree[mesh.octree[octreeIndex].children[2]].neighbors[5] = mesh.octree[octreeIndex].neighbors[4];
-	mesh.octree[mesh.octree[octreeIndex].children[3]].neighbors[0] = mesh.octree[octreeIndex].children[2];
-	mesh.octree[mesh.octree[octreeIndex].children[3]].neighbors[1] = mesh.octree[octreeIndex].neighbors[1];
-	mesh.octree[mesh.octree[octreeIndex].children[3]].neighbors[2] = mesh.octree[octreeIndex].neighbors[2];
-	mesh.octree[mesh.octree[octreeIndex].children[3]].neighbors[3] = mesh.octree[octreeIndex].children[7];
-	mesh.octree[mesh.octree[octreeIndex].children[3]].neighbors[4] = mesh.octree[octreeIndex].children[1];
-	mesh.octree[mesh.octree[octreeIndex].children[3]].neighbors[5] = mesh.octree[octreeIndex].neighbors[4];
-	mesh.octree[mesh.octree[octreeIndex].children[4]].neighbors[0] = mesh.octree[octreeIndex].neighbors[0];
-	mesh.octree[mesh.octree[octreeIndex].children[4]].neighbors[1] = mesh.octree[octreeIndex].children[5];
-	mesh.octree[mesh.octree[octreeIndex].children[4]].neighbors[2] = mesh.octree[octreeIndex].children[0];
-	mesh.octree[mesh.octree[octreeIndex].children[4]].neighbors[3] = mesh.octree[octreeIndex].neighbors[3];
-	mesh.octree[mesh.octree[octreeIndex].children[4]].neighbors[4] = mesh.octree[octreeIndex].neighbors[5];
-	mesh.octree[mesh.octree[octreeIndex].children[4]].neighbors[5] = mesh.octree[octreeIndex].children[6];
-	mesh.octree[mesh.octree[octreeIndex].children[5]].neighbors[0] = mesh.octree[octreeIndex].children[4];
-	mesh.octree[mesh.octree[octreeIndex].children[5]].neighbors[1] = mesh.octree[octreeIndex].neighbors[1];
-	mesh.octree[mesh.octree[octreeIndex].children[5]].neighbors[2] = mesh.octree[octreeIndex].children[1];
-	mesh.octree[mesh.octree[octreeIndex].children[5]].neighbors[3] = mesh.octree[octreeIndex].neighbors[3];
-	mesh.octree[mesh.octree[octreeIndex].children[5]].neighbors[4] = mesh.octree[octreeIndex].neighbors[5];
-	mesh.octree[mesh.octree[octreeIndex].children[5]].neighbors[5] = mesh.octree[octreeIndex].children[7];
-	mesh.octree[mesh.octree[octreeIndex].children[6]].neighbors[0] = mesh.octree[octreeIndex].neighbors[0];
-	mesh.octree[mesh.octree[octreeIndex].children[6]].neighbors[1] = mesh.octree[octreeIndex].children[7];
-	mesh.octree[mesh.octree[octreeIndex].children[6]].neighbors[2] = mesh.octree[octreeIndex].children[2];
-	mesh.octree[mesh.octree[octreeIndex].children[6]].neighbors[3] = mesh.octree[octreeIndex].neighbors[3];
-	mesh.octree[mesh.octree[octreeIndex].children[6]].neighbors[4] = mesh.octree[octreeIndex].children[4];
-	mesh.octree[mesh.octree[octreeIndex].children[6]].neighbors[5] = mesh.octree[octreeIndex].neighbors[4];
-	mesh.octree[mesh.octree[octreeIndex].children[7]].neighbors[0] = mesh.octree[octreeIndex].children[6];
-	mesh.octree[mesh.octree[octreeIndex].children[7]].neighbors[1] = mesh.octree[octreeIndex].neighbors[1];
-	mesh.octree[mesh.octree[octreeIndex].children[7]].neighbors[2] = mesh.octree[octreeIndex].children[3];
-	mesh.octree[mesh.octree[octreeIndex].children[7]].neighbors[3] = mesh.octree[octreeIndex].neighbors[3];
-	mesh.octree[mesh.octree[octreeIndex].children[7]].neighbors[4] = mesh.octree[octreeIndex].children[5];
-	mesh.octree[mesh.octree[octreeIndex].children[7]].neighbors[5] = mesh.octree[octreeIndex].neighbors[4];
+	for (int x = 0; x < 2; x++) {
+		for (int y = 0; y < 2; y++) {
+			for (int z = 0; z < 2; z++) {
+				int childIndex = 4 * x + 2 * y + z;
+				int childOctreeIndex = mesh.octree[octreeIndex].children[childIndex];
+				if (z == 0) {
+					mesh.octree[childOctreeIndex].neighbors[0] = mesh.octree[octreeIndex].neighbors[0];
+					mesh.octree[childOctreeIndex].neighbors[1] = mesh.octree[octreeIndex].children[childIndex + 1];
+				}
+				else {
+					mesh.octree[childOctreeIndex].neighbors[0] = mesh.octree[octreeIndex].children[childIndex - 1];
+					mesh.octree[childOctreeIndex].neighbors[1] = mesh.octree[octreeIndex].neighbors[1];
+				}
+				if (x == 0) {
+					mesh.octree[childOctreeIndex].neighbors[2] = mesh.octree[octreeIndex].neighbors[2];
+					mesh.octree[childOctreeIndex].neighbors[3] = mesh.octree[octreeIndex].children[childIndex + 4];
+				}
+				else {
+					mesh.octree[childOctreeIndex].neighbors[2] = mesh.octree[octreeIndex].children[childIndex - 4];
+					mesh.octree[childOctreeIndex].neighbors[3] = mesh.octree[octreeIndex].neighbors[3];
+				}
+				if (y == 0) {
+					mesh.octree[childOctreeIndex].neighbors[4] = mesh.octree[octreeIndex].neighbors[4];
+					mesh.octree[childOctreeIndex].neighbors[5] = mesh.octree[octreeIndex].children[childIndex + 2];
+				}
+				else {
+					mesh.octree[childOctreeIndex].neighbors[4] = mesh.octree[octreeIndex].children[childIndex - 2];
+					mesh.octree[childOctreeIndex].neighbors[5] = mesh.octree[octreeIndex].neighbors[5];
+				}
+			}
+		}
+	}
 	for (int i = 0; i < 8; i++) {
 		Subdivide(mesh, mesh.octree[octreeIndex].children[i], minTris, depth - 1);
 	}
@@ -567,7 +551,7 @@ void Mesh::GenerateOctree() {
 		newOctree.trisCount++;
 	}
 	octree.push_back(newOctree);
-	Subdivide(*this, 0, 20, 4);
+	Subdivide(*this, 0, 20, 8);
 }
 
 bool OBJReader(std::string path, Mesh &mesh) {

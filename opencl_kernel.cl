@@ -295,7 +295,7 @@ bool intersect_AABB(const double3 bounds[2], const Ray *ray, double2 *d, int *cl
 
 int getOppositeBoxSide(const double3 scaledDir, const int closeSide, double3 *uv) {
 	double3 inv_dir = 1.0 / scaledDir;
-	int sign[3] = { scaledDir.x < 0, scaledDir.y < 0, scaledDir.z < 0 };
+	int sign[3] = { inv_dir.x < 0, inv_dir.y < 0, inv_dir.z < 0 };
 	double dx = (1 - sign[0] - uv->x) * inv_dir.x;
 	double dy = (1 - sign[1] - uv->y) * inv_dir.y;
 	double dz = (1 - sign[2] - uv->z) * inv_dir.z;
@@ -337,13 +337,13 @@ bool intersect_Octree(
 		octrees[currOctreeIndex].min,
 		octrees[currOctreeIndex].max
 	};
-	int count = 0;
 	bool didHit = false;
 	if (!intersect_AABB(bounds, ray, &d, &closeSide, &farSide)) {
 		return false;
 	}
 	double3 uv = ray->origin + ray->dir * d.s0;
-	for (int step = 0; step < 1000 && currOctreeIndex != -1; step++) {
+	double3 scaledDir = normalize(ray->dir / (octrees[currOctreeIndex].max - octrees[currOctreeIndex].min));
+	while(currOctreeIndex != -1) {
 		double3 extents = octrees[currOctreeIndex].max - octrees[currOctreeIndex].min;
 		uv = (uv - octrees[currOctreeIndex].min) / extents;
 		while (octrees[currOctreeIndex].children[0] != -1) {
@@ -351,6 +351,14 @@ bool intersect_Octree(
 			currOctreeIndex = octrees[currOctreeIndex].children[childIndex];
 		}
 		/*
+		// Uncomment this to visualize Octree
+		if (octrees[currOctreeIndex].trisCount > 0 && ((uv.x < 0.1 && uv.y < 0.1) || (uv.x < 0.1 && uv.z < 0.1) || (uv.y < 0.1 && uv.z < 0.1))) {
+			hit->dist = 0.0001;
+			hit->normal = uv;
+			hit->color = (float3)(1, 1, 1);
+			return true;
+		}
+		*/
 		for (
 			int i = octrees[currOctreeIndex].trisIndex;
 			i < octrees[currOctreeIndex].trisIndex + octrees[currOctreeIndex].trisCount;
@@ -369,28 +377,23 @@ bool intersect_Octree(
 					double u = newHit.uv.s0;
 					double v = newHit.uv.s1;
 					newHit.normal = (1.0 - u - v)*normA + u * normB + v * normC;
+					newHit.color = (float3)(1, 1, 1);
 					*hit = newHit;
-					return true;
 					didHit = true;
 				}
 			}
 		}
-		*/
-		count += octrees[currOctreeIndex].trisCount;
 		extents = octrees[currOctreeIndex].max - octrees[currOctreeIndex].min;
-		double3 scaledDir = ray->dir / extents;
 		farSide = getOppositeBoxSide(scaledDir, closeSide, &uv);
 		closeSide = farSide - 2 * (farSide % 2) + 1;
 		uv = octrees[currOctreeIndex].min + uv * extents;
 		currOctreeIndex = octrees[currOctreeIndex].neighbors[farSide];
+		if (length(uv - ray->origin) > hit->dist) {
+			break;
+		}
 	}
-	if (count > 0) {
-		hit->dist = 0.001;
-		hit->normal = (double3)((double)count / (count + 1), 0, 0);
-		hit->color = (float3)(1, 1, 1);
-		return true;
-	}
-	return false;
+
+	return didHit;
 }
 
 bool intersect_cube(global const Object *objects, int index, const Ray *ray, Hit *hit) {
@@ -468,53 +471,7 @@ bool intersect_mesh(
 	Ray newRay;
 	newRay.origin = transformPoint(objects[index].InvM, ray->origin);
 	newRay.dir = normalize(transformDirection(objects[index].InvM, ray->dir));
-
 	return intersect_Octree(vertices, normals, triangles, octrees, octreeTris, &newRay, hit);
-
-	double3 bounds[2] = { octrees[0].min, octrees[0].max };
-	double2 d;
-	int closeSide, farSide;
-
-	if (intersect_AABB(bounds, &newRay, &d, &closeSide, &farSide)) {
-		double3 extents = octrees[0].max - octrees[0].min;
-		double3 u1 = (newRay.origin + d.s0 * newRay.dir - bounds[0]) / extents;
-		double3 u2 = (newRay.origin + d.s1 * newRay.dir - bounds[0]) / extents;
-		
-		
-
-
-		
-		Hit newHit;
-		newHit.color = objects[index].color;
-		bool didHit = false;
-		for (int i = octrees[0].trisIndex; i < octrees[0].trisIndex + octrees[0].trisCount; i++) {
-			int tri = octreeTris[i];
-			double3 A = vertices[triangles[9 * i + 3 * 0]];
-			double3 B = vertices[triangles[9 * i + 3 * 1]];
-			double3 C = vertices[triangles[9 * i + 3 * 2]];
-
-			if (intersect_triangle(A, B, C, &newRay, &newHit)) {
-				double3 objPt = newRay.origin + newRay.dir * newHit.dist;
-				double3 worldPt = transformPoint(objects[index].M, objPt);
-				newHit.dist = length(worldPt);
-				if (newHit.dist > 0.0f && newHit.dist < hit->dist) {
-					double3 normA = normals[triangles[2 + 9 * i + 3 * 0]];
-					double3 normB = normals[triangles[2 + 9 * i + 3 * 1]];
-					double3 normC = normals[triangles[2 + 9 * i + 3 * 2]];
-					double u = newHit.uv.s0;
-					double v = newHit.uv.s1;
-					newHit.normal = (1.0 - u - v)*normA + u * normB + v * normC;
-					*hit = newHit;
-					didHit = true;
-				}
-			}
-		}
-		if (didHit) {
-			hit->normal = normalize(applyTranspose(objects[index].InvM, hit->normal));
-			return true;
-		}
-	}
-	return false;
 }
 
 bool intersect_scene(
@@ -542,12 +499,13 @@ bool intersect_scene(
 		newHit.dist = inf;
 		if (i == 6) {
 			if (intersect_mesh(objects, i, vertices, normals, triangles, face_count, octrees, octreeTris, ray, &newHit)) {
-				if (newHit.dist > 0.0f && newHit.dist < hit->dist) {
+				if (newHit.dist < hit->dist) {
 					*hit = newHit;
 					break;
 				}
 			}
 		}
+		/*
 		else {
 			switch (objects[i].type) {
 			case SPHERE:
@@ -566,6 +524,7 @@ bool intersect_scene(
 				break;
 			}
 		}
+		*/
 	}
 	return hit->dist < inf; /* true when ray interesects the scene */
 }
