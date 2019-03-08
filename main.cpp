@@ -10,6 +10,7 @@
 #include "gl_interop.h"
 #include <CL\cl.hpp>
 #include <chrono>
+#include <map>
 
 // TODO
 // cleanup()
@@ -18,7 +19,7 @@
 using namespace std;
 using namespace cl;
 
-const int object_count = 9;
+const int object_count = 8;
 
 std::chrono::time_point<std::chrono::high_resolution_clock> clock_start, clock_end;
 
@@ -50,16 +51,16 @@ unsigned int framenumber = 0;
 // alignment can also be enforced by using __attribute__ ((aligned (16)));
 // see https://www.khronos.org/registry/cl/sdk/1.0/docs/man/xhtml/attributes-variables.html
 
-enum objectType{SPHERE, CUBE};
+enum objectType{SPHERE, CUBE, MESH};
 
 struct Object
 {
 	cl_double4 M[4];
 	cl_double4 InvM[4];
 	cl_float3 color;
+	int meshIndex;
 	enum objectType type;
-	cl_float dummy1;
-	cl_float dummy2;
+	cl_float dummy;
 };
 
 Object cpu_objects[object_count];
@@ -82,8 +83,9 @@ struct Mesh
 	std::vector<cl_double3> normals;
 	std::vector<Octree> octree;
 	std::vector<int> octreeTris;
+	std::vector<int> meshIndices;
 
-	void GenerateOctree();
+	void GenerateOctree(int firstTriIndex);
 };
 
 Mesh theMesh;
@@ -291,7 +293,7 @@ cl_double3 normalize(const cl_double3 v) {
 	return double3(v.x / m, v.y / m, v.z / m);
 }
 
-cl_double3 operator+(const cl_double3 v1, const cl_double3 v2) {
+cl_double3 operator+(const cl_double3 &v1, const cl_double3 &v2) {
 	return double3(
 		v1.x + v2.x,
 		v1.y + v2.y,
@@ -299,7 +301,12 @@ cl_double3 operator+(const cl_double3 v1, const cl_double3 v2) {
 	);
 }
 
-cl_double3 operator-(const cl_double3 v1, const cl_double3 v2) {
+cl_double3 &operator+=(cl_double3 &v1, const cl_double3 &v2) {
+	v1 = v1 + v2;
+	return v1;
+}
+
+cl_double3 operator-(const cl_double3 &v1, const cl_double3 &v2) {
 	return double3(
 		v1.x - v2.x,
 		v1.y - v2.y,
@@ -307,7 +314,7 @@ cl_double3 operator-(const cl_double3 v1, const cl_double3 v2) {
 	);
 }
 
-cl_double3 operator*(const cl_double3 v, const double c) {
+cl_double3 operator*(const cl_double3 &v, const double &c) {
 	return double3(
 		v.x * c,
 		v.y * c,
@@ -315,7 +322,7 @@ cl_double3 operator*(const cl_double3 v, const double c) {
 	);
 }
 
-cl_double3 operator/(const cl_double3 v, const double c) {
+cl_double3 operator/(const cl_double3 &v, const double &c) {
 	return double3(
 		v.x / c,
 		v.y / c,
@@ -323,11 +330,11 @@ cl_double3 operator/(const cl_double3 v, const double c) {
 	);
 }
 
-double dot(const cl_double3 a, const cl_double3 b) {
+double dot(const cl_double3 &a, const cl_double3 &b) {
 	return a.x * b.x + a.y * b.y + a.z * b.z;
 }
 
-cl_double3 cross(const cl_double3 a, const cl_double3 b) {
+cl_double3 cross(const cl_double3 &a, const cl_double3 &b) {
 	return double3(
 		a.y * b.z - a.z * b.y,
 		a.z * b.x - a.x * b.z,
@@ -335,7 +342,7 @@ cl_double3 cross(const cl_double3 a, const cl_double3 b) {
 	);
 }
 
-cl_double3 elementwise_min(const cl_double3 a, const cl_double3 b) {
+cl_double3 elementwise_min(const cl_double3 &a, const cl_double3 &b) {
 	return double3(
 		min(a.x, b.x),
 		min(a.y, b.y),
@@ -343,7 +350,7 @@ cl_double3 elementwise_min(const cl_double3 a, const cl_double3 b) {
 	);
 }
 
-cl_double3 elementwise_max(const cl_double3 a, const cl_double3 b) {
+cl_double3 elementwise_max(const cl_double3 &a, const cl_double3 &b) {
 	return double3(
 		max(a.x, b.x),
 		max(a.y, b.y),
@@ -583,14 +590,13 @@ void Subdivide(Mesh &mesh, int octreeIndex, int minTris, int depth) {
 	}
 }
 
-void Mesh::GenerateOctree() {
+void Mesh::GenerateOctree(int firstTriIndex) {
 	Octree newOctree;
-	octreeTris.clear();
 	newOctree.trisCount = 0;
-	newOctree.trisIndex = 0;
-	newOctree.min = vertices[triangles[0]];
-	newOctree.max = vertices[triangles[0]];
-	for (int i = 1; i < triangles.size() / 3; i++) {
+	newOctree.trisIndex = octreeTris.size();
+	newOctree.min = vertices[triangles[firstTriIndex]];
+	newOctree.max = vertices[triangles[firstTriIndex]];
+	for (int i = firstTriIndex/3; i < triangles.size() / 3; i++) {
 		cl_double3 vert = vertices[triangles[3 * i]];
 		newOctree.min = elementwise_min(newOctree.min, vert);
 		newOctree.max = elementwise_max(newOctree.max, vert);
@@ -599,8 +605,9 @@ void Mesh::GenerateOctree() {
 		octreeTris.push_back(i);
 		newOctree.trisCount++;
 	}
+	int octreeIndex = octree.size();
 	octree.push_back(newOctree);
-	Subdivide(*this, 0, 6, 12);
+	Subdivide(*this, octreeIndex, 6, 12);
 	/*
 	ofstream f("octree.json");
 	json(*this, 0, f, 0);
@@ -615,12 +622,13 @@ bool OBJReader(std::string path, Mesh &mesh) {
 		perror("Error opening OBJ file");
 		return false;
 	}
-	mesh.vertices.clear();
-	mesh.triangles.clear();
-	mesh.uvs.clear();
-	mesh.normals.clear();
 	std::string line;
+	std::map<int, std::vector<int>> vertToTrisMap;
 	int lineno = 0;
+	int firstTriIndex = mesh.triangles.size();
+	int firstVertIndex = mesh.vertices.size();
+	int firstNormIndex = mesh.normals.size();
+	int firstUVIndex = mesh.uvs.size();
 	while (std::getline(file, line)) {
 		std::istringstream stream(line);
 		std::string prefix;
@@ -658,34 +666,54 @@ bool OBJReader(std::string path, Mesh &mesh) {
 		}
 		else if (prefix == "f") {
 			std::string tri;
-			bool needsNormal = false;
+			int triIndex = mesh.triangles.size() / 9;
 			for (int i = 0; i < 3; i++) {
 				stream >> tri;
 				std::istringstream vertstream(tri);
 				std::string vert, uv, norm;
 				std::getline(vertstream, vert, '/');
+				int vertIndex = stoul(vert) - 1 + firstVertIndex;
 				if (!std::getline(vertstream, uv, '/')) {
 					uv = "1";
 				}
 				if (!std::getline(vertstream, norm, '/')) {
-					norm = std::to_string(mesh.normals.size()+1);
-					needsNormal = true;
-				}
-				mesh.triangles.push_back(stoul(vert)-1);
-				mesh.triangles.push_back(stoul(uv)-1);
-				mesh.triangles.push_back(stoul(norm)-1);
-			}
-			if (needsNormal) {
-				cl_double3 A = mesh.vertices[mesh.triangles[mesh.triangles.size() - 3]];
-				cl_double3 B = mesh.vertices[mesh.triangles[mesh.triangles.size() - 6]];
-				cl_double3 C = mesh.vertices[mesh.triangles[mesh.triangles.size() - 9]];
-				cl_double3 N = normalize(cross(B - A, C - A));
-				mesh.normals.push_back(N);
+					norm = "1";
+					vertToTrisMap[vertIndex].push_back(triIndex);
+				}				
+				mesh.triangles.push_back(vertIndex);
+				mesh.triangles.push_back(stoul(uv) - 1 + firstUVIndex);
+				mesh.triangles.push_back(stol(norm) - 1 + firstNormIndex);
 			}
 		}
 		lineno++;
 	}
-	mesh.GenerateOctree();
+	for (const auto& kv : vertToTrisMap) {
+		int vertIndex = kv.first;
+		auto triList = kv.second;
+		cl_double3 N = double3(0, 0, 0);
+		for (int triIndex : triList) {
+			int AIndex = mesh.triangles[9 * triIndex + 3 * 0];
+			int BIndex = mesh.triangles[9 * triIndex + 3 * 1];
+			int CIndex = mesh.triangles[9 * triIndex + 3 * 2];
+			cl_double3 A = mesh.vertices[AIndex];
+			cl_double3 B = mesh.vertices[BIndex];
+			cl_double3 C = mesh.vertices[CIndex];
+			// Don't normalize: the cross product is proportional to the area of the triangle,
+			// and we want the normal contribution to be proportional to the area as well.
+			N += cross(B - A, C - A);
+			if (AIndex == vertIndex) {
+				mesh.triangles[2 + 9 * triIndex + 3 * 0] = mesh.normals.size();
+			} else if (BIndex == vertIndex) {
+				mesh.triangles[2 + 9 * triIndex + 3 * 1] = mesh.normals.size();
+			}else if (CIndex == vertIndex) {
+				mesh.triangles[2 + 9 * triIndex + 3 * 2] = mesh.normals.size();
+			}
+		}
+		mesh.normals.push_back(normalize(N));
+	}
+	int newOctreeIndex = mesh.octree.size();
+	mesh.meshIndices.push_back(newOctreeIndex);
+	mesh.GenerateOctree(firstTriIndex);
 	return true;
 }
 
@@ -762,9 +790,13 @@ void TRS(Object *object, cl_double3 translation, double angle, cl_double3 axis, 
 }
 
 void initScene(Object* cpu_objects) {
-	if (!OBJReader("models/StanfordBunny.obj", theMesh)) {
+	if (!OBJReader("models/pear.obj", theMesh)) {
 		exit(EXIT_FAILURE);
 	}
+	if (!OBJReader("models/bunny.obj", theMesh)) {
+		exit(EXIT_FAILURE);
+	}
+
 
 	queue.enqueueWriteBuffer(cl_objects, CL_TRUE, 0, object_count * sizeof(Object), cpu_objects);
 
@@ -788,30 +820,27 @@ void initScene(Object* cpu_objects) {
 	cpu_objects[3].type = CUBE;
 	TRS(&cpu_objects[3], double3(0, 6, 10), 0, double3(0, 1, 0), double3(10, 0.1f, 10));
 
-	// back wall
+	// front wall 
 	cpu_objects[4].color = float3(0.9f, 0.8f, 0.7f);
 	cpu_objects[4].type = CUBE;
-	//TRS(&cpu_objects[4], double3(0, 0, -1), 0, double3(0, 1, 0), double3(10, 10, 0.1f));
+	TRS(&cpu_objects[4], double3(0, 0, 16), 0, double3(0, 1, 0), double3(10, 10, 0.1f));
 
-	// front wall 
-	cpu_objects[5].color = float3(0.9f, 0.8f, 0.7f);
-	cpu_objects[5].type = CUBE;
-	TRS(&cpu_objects[5], double3(0, 0, 16), 0, double3(0, 1, 0), double3(10, 10, 0.1f));
+	// Pear
+	cpu_objects[5].color = float3(1, 1, 1);
+	cpu_objects[5].type = MESH;
+	cpu_objects[5].meshIndex = theMesh.meshIndices[0];
+	TRS(&cpu_objects[5], double3(-3, -4.75f, 12), 0, double3(0, 1, 0), double3(0.01, 0.01, 0.01));
 
-	// left cube
-	cpu_objects[6].color = float3(1, 1, 1);
-	cpu_objects[6].type = CUBE;
-	TRS(&cpu_objects[6], double3(-3, -4.75f, 12), 0, double3(0, 1, 0), double3(1, 1, 1));
-
-	// right sphere
-	cpu_objects[7].color = float3(0.1f, 0.2f, 0.9f);
-	cpu_objects[7].type = SPHERE;
-	TRS(&cpu_objects[7], double3(0.25f, -0.14f, 1.1f), 0, double3(0, 1, 0), double3(0.05, 0.16f, 0.16f));
+	// Rabbit
+	cpu_objects[6].color = float3(1.0f, 0.2f, 0.9f);
+	cpu_objects[6].type = SPHERE;
+	cpu_objects[6].meshIndex = theMesh.meshIndices[1];
+	TRS(&cpu_objects[6], double3(1, -0.14f, 7), 0, double3(1, 0, 0), double3(10, 10, -10));
 
 	// lightsource
-	cpu_objects[8].color = float3(0.0f, 1.0f, 0.0f);
-	cpu_objects[8].type = SPHERE;
-	TRS(&cpu_objects[8], double3(0, 0.5f, 1), 0, double3(0, 1, 0), double3(0.1f, 0.1f, 0.1f));
+	cpu_objects[7].color = float3(0.0f, 1.0f, 0.0f);
+	cpu_objects[7].type = SPHERE;
+	TRS(&cpu_objects[7], double3(0, 3, 15), 0, double3(0, 1, 0), double3(1, 1, 1));
 }
 
 void initCLKernel(){
@@ -828,12 +857,11 @@ void initCLKernel(){
 	kernel.setArg(2, cl_vertices);
 	kernel.setArg(3, cl_normals);
 	kernel.setArg(4, cl_triangles);
-	kernel.setArg(5, (unsigned int)(theMesh.triangles.size()/9));
-	kernel.setArg(6, cl_octrees);
-	kernel.setArg(7, cl_octreeTris);
-	kernel.setArg(8, window_width);
-	kernel.setArg(9, window_height);
-	kernel.setArg(10, cl_vbo);
+	kernel.setArg(5, cl_octrees);
+	kernel.setArg(6, cl_octreeTris);
+	kernel.setArg(7, window_width);
+	kernel.setArg(8, window_height);
+	kernel.setArg(9, cl_vbo);
 }
 
 void runKernel(){
@@ -902,7 +930,15 @@ void render(){
 		initCLKernel();
 	}
 
-	TRS(&cpu_objects[6], double3(0, -1, 8),ms / 1000.0, double3(0, 1, 0), double3(15, 15, 15));
+	TRS(&cpu_objects[5], double3(2, -4.9, 13),ms / 1000.0, double3(0, 1, 0), double3(0.5, 0.5, 0.5));
+
+	//TRS(&cpu_objects[6], double3(1, -0.14f, 2 + 5*sin(ms/1500.0)), ms / 500.0, double3(0, 1, 0), double3(0.10, 0.10, -0.10));
+
+	//TRS(&cpu_objects[7], double3(sin(ms/1000.0), -1 + cos(ms / 1000.0), 12*sin(ms/2000.0)), 0, double3(0, 1, 0), double3(0.5, 0.5, 0.5));
+	//TRS(&cpu_objects[7], double3(-6, 5, 16 + 2*sin(ms/2000.0)), 0, double3(0, 1, 0), double3(0.5, 0.5, 0.5));
+
+	TRS(&cpu_objects[6], double3(3 * sin(ms/1000.0), -1, 7), 0, double3(0, 1, 0), double3(0.10, 0.10, -0.10));
+	TRS(&cpu_objects[7], double3(2, -1, 7), 0, double3(0, 1, 0), double3(0.5, 0.5, 0.5));
 
 	queue.enqueueWriteBuffer(cl_objects, CL_TRUE, 0, object_count * sizeof(Object), cpu_objects);
 

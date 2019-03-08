@@ -12,12 +12,13 @@ typedef struct Ray{
 	double3 dir;
 } Ray;
 
-enum objectType { SPHERE, CUBE };
+enum objectType { SPHERE, CUBE, MESH };
 
 typedef struct Object {
 	double4 M[4];
 	double4 InvM[4];
 	float3 color;
+	int meshIndex;
 	enum objectType type;
 } Object;
 
@@ -26,6 +27,7 @@ typedef struct Hit {
 	double3 normal;
 	double2 uv;
 	float3 color;
+	int object;
 } Hit;
 
 typedef struct Octree {
@@ -321,7 +323,9 @@ int getOppositeBoxSide(const double3 scaledDir, const int closeSide, double3 *uv
 	}
 }
 
-bool intersect_Octree(
+bool intersect_octree(
+	global const Object* objects,
+	const int index,
 	global const double3 *vertices,
 	global const double3 *normals,
 	global const unsigned int *triangles,
@@ -330,7 +334,11 @@ bool intersect_Octree(
 	const Ray *ray,
 	Hit *hit
 ) {
-	int currOctreeIndex = 0;
+	Ray newRay;
+	newRay.origin = transformPoint(objects[index].InvM, ray->origin);
+	newRay.dir = normalize(transformDirection(objects[index].InvM, ray->dir));
+
+	int currOctreeIndex = objects[index].meshIndex;
 	double2 d;
 	int closeSide, farSide;
 	double3 bounds[2] = {
@@ -338,11 +346,11 @@ bool intersect_Octree(
 		octrees[currOctreeIndex].max
 	};
 	bool didHit = false;
-	if (!intersect_AABB(bounds, ray, &d, &closeSide, &farSide)) {
+	if (!intersect_AABB(bounds, &newRay, &d, &closeSide, &farSide)) {
 		return false;
 	}
-	double3 uv = ray->origin + ray->dir * d.s0;
-	double3 scaledDir = normalize(ray->dir / (octrees[currOctreeIndex].max - octrees[currOctreeIndex].min));
+	double3 uv = newRay.origin + newRay.dir * d.s0;
+	double3 scaledDir = normalize(newRay.dir / (octrees[currOctreeIndex].max - octrees[currOctreeIndex].min));
 	while(currOctreeIndex != -1) {
 		double3 extents = octrees[currOctreeIndex].max - octrees[currOctreeIndex].min;
 		uv = (uv - octrees[currOctreeIndex].min) / extents;
@@ -360,7 +368,7 @@ bool intersect_Octree(
 			double3 B = vertices[triangles[9 * tri + 3 * 1]];
 			double3 C = vertices[triangles[9 * tri + 3 * 2]];
 			Hit newHit;
-			if (intersect_triangle(A, B, C, ray, &newHit)) {
+			if (intersect_triangle(A, B, C, &newRay, &newHit)) {
 				if (newHit.dist > 0.0f && newHit.dist < hit->dist) {
 					double3 normA = normals[triangles[2 + 9 * tri + 3 * 0]];
 					double3 normB = normals[triangles[2 + 9 * tri + 3 * 1]];
@@ -379,12 +387,18 @@ bool intersect_Octree(
 		closeSide = farSide - 2 * (farSide % 2) + 1;
 		uv = octrees[currOctreeIndex].min + uv * extents;
 		currOctreeIndex = octrees[currOctreeIndex].neighbors[farSide];
-		if (length(uv - ray->origin) > hit->dist) {
+		if (length(uv - newRay.origin) > hit->dist) {
 			break;
 		}
 	}
-
-	return didHit;
+	if (didHit) {
+		double3 objPoint = newRay.origin + hit->dist * newRay.dir;
+		double3 worldPoint = transformPoint(objects[index].M, objPoint);
+		hit->dist = length(worldPoint - ray->origin);
+		hit->normal = normalize(applyTranspose(objects[index].InvM, hit->normal));
+		return true;
+	}
+	return false;
 }
 
 bool intersect_cube(global const Object *objects, int index, const Ray *ray, Hit *hit) {
@@ -437,7 +451,7 @@ bool intersect_sphere(global const Object *objects, const int index, const Ray *
 	} else if ((b + disc) > EPSILON) {
 		dist = b + disc;
 	} else {
-		dist = 0.0;
+		return false;
 	}
 	double3 objPt = -rayToSphere + dir * dist;
 	double3 worldPt = transformPoint(objects[index].M, objPt);
@@ -447,38 +461,12 @@ bool intersect_sphere(global const Object *objects, const int index, const Ray *
 	return true;
 }
 
-bool intersect_mesh(
-	global const Object* objects,
-	const int index,
-	global const double3 *vertices,
-	global const double3 *normals,
-	global const unsigned int *triangles,
-	const unsigned int face_count,
-	global const Octree *octrees,
-	global const int *octreeTris,
-	const Ray *ray,
-	Hit *hit
-) {
-	Ray newRay;
-	newRay.origin = transformPoint(objects[index].InvM, ray->origin);
-	newRay.dir = normalize(transformDirection(objects[index].InvM, ray->dir));
-	if (intersect_Octree(vertices, normals, triangles, octrees, octreeTris, &newRay, hit)) {
-		double3 objPoint = newRay.origin + hit->dist * newRay.dir;
-		double3 worldPoint = transformPoint(objects[index].M, objPoint);
-		hit->dist = length(worldPoint - ray->origin);
-		hit->normal = normalize(applyTranspose(objects[index].InvM, hit->normal));
-		return true;
-	}
-	return false;
-}
-
 bool intersect_scene(
 	global const Object* objects,
 	const int object_count,
 	global const double3 *vertices,
 	global const double3 *normals,
 	global const unsigned int *triangles,
-	const unsigned int face_count,
 	global const Octree *octrees,
 	global const int *octreeTris,
 	const Ray *ray,
@@ -495,31 +483,31 @@ bool intersect_scene(
 	for (int i = 0; i < object_count; i++) {
 		Hit newHit;
 		newHit.dist = inf;
-		if (i == 6) {
-			if (intersect_mesh(objects, i, vertices, normals, triangles, face_count, octrees, octreeTris, ray, &newHit)) {
+		switch (objects[i].type) {
+		case SPHERE:
+			if (intersect_sphere(objects, i, ray, &newHit)) {
+				if (newHit.dist > 0.0f && newHit.dist < hit->dist) {
+					*hit = newHit;
+					hit->object = i;
+				}
+			}
+			break;
+		case CUBE:
+			if (intersect_cube(objects, i, ray, &newHit)) {
+				if (newHit.dist > 0.0f && newHit.dist < hit->dist) {
+					*hit = newHit;
+					hit->object = i;
+				}
+			}
+			break;
+		case MESH:
+			if (intersect_octree(objects, i, vertices, normals, triangles, octrees, octreeTris, ray, &newHit)) {
 				if (newHit.dist < hit->dist) {
 					*hit = newHit;
-					break;
+					hit->object = i;
 				}
 			}
-		}
-		else {
-			switch (objects[i].type) {
-			case SPHERE:
-				if (intersect_sphere(objects, i, ray, &newHit)) {
-					if (newHit.dist > 0.0f && newHit.dist < hit->dist) {
-						*hit = newHit;
-					}
-				}
-				break;
-			case CUBE:
-				if (intersect_cube(objects, i, ray, &newHit)) {
-					if (newHit.dist > 0.0f && newHit.dist < hit->dist) {
-						*hit = newHit;
-					}
-				}
-				break;
-			}
+			break;
 		}
 	}
 	return hit->dist < inf; /* true when ray interesects the scene */
@@ -537,27 +525,48 @@ float3 trace(
 	global const double3 *vertices,
 	global const double3 *normals,
 	global const unsigned int *triangles,
-	const unsigned int face_count,
 	global const Octree *octrees,
 	global const int *octreeTris,
 	const Ray* camray
 ) {
 	Hit hit;
-	if (!intersect_scene(objects, object_count, vertices, normals, triangles, face_count, octrees, octreeTris, camray, &hit))
+	if (!intersect_scene(objects, object_count, vertices, normals, triangles, octrees, octreeTris, camray, &hit))
 		return (float3)(0.15f, 0.15f, 0.25f);
 
 	double3 hitpoint = camray->origin + camray->dir * hit.dist;
 	double3 normal = hit.normal;
 
-	float3 color = hit.color * 0.2f;
-	double3 light_pos = (double3)(0, 0.25, 0);
-	double3 light_dir = light_pos - hitpoint;
-	float light_intensity = 50;
-	if (dot(light_dir, normal) > 0) {
-		color += (float)(dot(normalize(light_dir), normal) / (dot(light_dir, light_dir))) * hit.color * light_intensity;
+	float3 color = hit.color * 0.5f;
+
+	if (objects[hit.object].type == MESH) {
+		Ray reflectRay;
+		reflectRay.dir = camray->dir - 2 * normal * dot(normal, camray->dir);
+		reflectRay.origin = hitpoint + reflectRay.dir * 0.001;
+
+		if (!intersect_scene(objects, object_count, vertices, normals, triangles, octrees, octreeTris, &reflectRay, &hit))
+			return (float3)(0.15f, 0.15f, 0.25f);
+
+		hitpoint = reflectRay.origin + reflectRay.dir * hit.dist;
+		normal = hit.normal;
+
+		color += hit.color * 0.2f;
+	}
+	
+	double3 light_pos = (double3)(0, -1, 7);
+	double3 light_dir = hitpoint - light_pos;
+	
+	Ray lightRay;
+	lightRay.dir = normalize(light_dir);
+	lightRay.origin = light_pos;
+
+	Hit newHit;
+	if (dot(normal, -light_dir) > 0) {
+		bool didHit = intersect_scene(objects, object_count, vertices, normals, triangles, octrees, octreeTris, &lightRay, &newHit);
+		if (didHit && newHit.object == hit.object) {
+			color += (float)dot(normal, -lightRay.dir) * hit.color;
+		}
 	}
 	return color;
-	
 }
 
 union Colour { float c; uchar4 components; };
@@ -568,7 +577,6 @@ __kernel void render_kernel(
 	global const double3 *vertices,
 	global const double3 *normals,
 	global const int *triangles,
-	const int face_count,
 	global const Octree *octrees,
 	global const int *octreeTris,
 	const int width,
@@ -585,7 +593,7 @@ __kernel void render_kernel(
 		for (int x = 0; x < MSAASAMPLES; x++) {
 			Ray camray = createCamRay((double)x_coord + (double)x/MSAASAMPLES, (double)y_coord + (double)y/ MSAASAMPLES, width, height);
 
-			finalcolor += trace(objects, object_count, vertices, normals, triangles, face_count, octrees, octreeTris, &camray);
+			finalcolor += trace(objects, object_count, vertices, normals, triangles, octrees, octreeTris, &camray);
 		}
 	}
 	finalcolor = finalcolor / (MSAASAMPLES*MSAASAMPLES);
