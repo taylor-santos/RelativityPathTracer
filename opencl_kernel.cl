@@ -350,15 +350,6 @@ bool intersect_Octree(
 			int childIndex = getChildIndex(closeSide, &uv);
 			currOctreeIndex = octrees[currOctreeIndex].children[childIndex];
 		}
-		/*
-		// Uncomment this to visualize Octree
-		if (octrees[currOctreeIndex].trisCount > 0 && ((uv.x < 0.1 && uv.y < 0.1) || (uv.x < 0.1 && uv.z < 0.1) || (uv.y < 0.1 && uv.z < 0.1))) {
-			hit->dist = 0.0001;
-			hit->normal = uv;
-			hit->color = (float3)(1, 1, 1);
-			return true;
-		}
-		*/
 		for (
 			int i = octrees[currOctreeIndex].trisIndex;
 			i < octrees[currOctreeIndex].trisIndex + octrees[currOctreeIndex].trisCount;
@@ -377,7 +368,7 @@ bool intersect_Octree(
 					double u = newHit.uv.s0;
 					double v = newHit.uv.s1;
 					newHit.normal = (1.0 - u - v)*normA + u * normB + v * normC;
-					newHit.color = (float3)(1, 1, 1);
+					newHit.color = convert_float3((newHit.normal + 1) / 2);
 					*hit = newHit;
 					didHit = true;
 				}
@@ -471,7 +462,14 @@ bool intersect_mesh(
 	Ray newRay;
 	newRay.origin = transformPoint(objects[index].InvM, ray->origin);
 	newRay.dir = normalize(transformDirection(objects[index].InvM, ray->dir));
-	return intersect_Octree(vertices, normals, triangles, octrees, octreeTris, &newRay, hit);
+	if (intersect_Octree(vertices, normals, triangles, octrees, octreeTris, &newRay, hit)) {
+		double3 objPoint = newRay.origin + hit->dist * newRay.dir;
+		double3 worldPoint = transformPoint(objects[index].M, objPoint);
+		hit->dist = length(worldPoint - ray->origin);
+		hit->normal = normalize(applyTranspose(objects[index].InvM, hit->normal));
+		return true;
+	}
+	return false;
 }
 
 bool intersect_scene(
@@ -505,7 +503,6 @@ bool intersect_scene(
 				}
 			}
 		}
-		/*
 		else {
 			switch (objects[i].type) {
 			case SPHERE:
@@ -524,7 +521,6 @@ bool intersect_scene(
 				break;
 			}
 		}
-		*/
 	}
 	return hit->dist < inf; /* true when ray interesects the scene */
 }
@@ -546,25 +542,21 @@ float3 trace(
 	global const int *octreeTris,
 	const Ray* camray
 ) {
-	float3 accum_color = (float3)(0.0f, 0.0f, 0.0f);
-	float3 mask = (float3)(1.0f, 1.0f, 1.0f);
-
-	float t;   /* distance to intersection */
-
-	/* if ray misses scene, return background colour */
 	Hit hit;
 	if (!intersect_scene(objects, object_count, vertices, normals, triangles, face_count, octrees, octreeTris, camray, &hit))
-		return accum_color += mask * (float3)(0.15f, 0.15f, 0.25f);
+		return (float3)(0.15f, 0.15f, 0.25f);
 
-	/* compute the hitpoint using the ray equation */
 	double3 hitpoint = camray->origin + camray->dir * hit.dist;
-
-	/* compute the surface normal and flip it if necessary to face the incoming ray */
 	double3 normal = hit.normal;
 
-	float3 color = convert_float3(normal);
-	color = (color + (float3)(1, 1, 1)) / 2;
-	return color * hit.color;
+	float3 color = hit.color * 0.2f;
+	double3 light_pos = (double3)(0, 0.25, 0);
+	double3 light_dir = light_pos - hitpoint;
+	float light_intensity = 50;
+	if (dot(light_dir, normal) > 0) {
+		color += (float)(dot(normalize(light_dir), normal) / (dot(light_dir, light_dir))) * hit.color * light_intensity;
+	}
+	return color;
 	
 }
 
@@ -601,9 +593,9 @@ __kernel void render_kernel(
 
 	union Colour fcolour;
 	fcolour.components = (uchar4)(	
-		(unsigned char)(finalcolor.x * 255), 
-		(unsigned char)(finalcolor.y * 255),
-		(unsigned char)(finalcolor.z * 255),
+		(unsigned char)(min(finalcolor.x, 1.0f) * 255), 
+		(unsigned char)(min(finalcolor.y, 1.0f) * 255),
+		(unsigned char)(min(finalcolor.z, 1.0f) * 255),
 		1);
 
 	/* store the pixelcolour in the output buffer */
