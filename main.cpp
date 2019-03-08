@@ -9,6 +9,7 @@
 #include <Windows.h>
 #include "gl_interop.h"
 #include <CL\cl.hpp>
+#include <chrono>
 
 // TODO
 // cleanup()
@@ -19,6 +20,7 @@ using namespace cl;
 
 const int object_count = 9;
 
+std::chrono::time_point<std::chrono::high_resolution_clock> clock_start, clock_end;
 
 // OpenCL objects
 Device device;
@@ -32,6 +34,8 @@ Buffer cl_vertices;
 Buffer cl_normals;
 Buffer cl_uvs;
 Buffer cl_triangles;
+Buffer cl_octrees;
+Buffer cl_octreeTris;
 BufferGL cl_vbo;
 vector<Memory> cl_vbos;
 
@@ -64,8 +68,10 @@ struct Octree
 {
 	cl_double3 min;
 	cl_double3 max;
-	int children[8];
-	int neighbors[8];
+	int trisIndex,
+		trisCount;
+	int children[8]  = { -1, -1, -1, -1, -1, -1, -1, -1 };
+	int neighbors[6] = { -1, -1, -1, -1, -1, -1 };
 };
 
 struct Mesh
@@ -74,9 +80,63 @@ struct Mesh
 	std::vector<unsigned int> triangles;
 	std::vector<cl_double2> uvs;
 	std::vector<cl_double3> normals;
+	std::vector<Octree> octree;
+	std::vector<int> octreeTris;
+
+	void GenerateOctree();
 };
 
 Mesh theMesh;
+
+void json(Mesh const& mesh, const unsigned int octreeIndex, ostream &out, const unsigned int indent) {
+	out << "{" << std::endl;
+	out << std::string(indent + 1, '\t') << "\"bounds\": {" << std::endl;
+	out << std::string(indent + 2, '\t') << "\"min\": \"(" << mesh.octree[octreeIndex].min.x << ", "
+		<< mesh.octree[octreeIndex].min.y << ", " << mesh.octree[octreeIndex].min.z << ")\"," << std::endl;
+	out << std::string(indent + 2, '\t') << "\"max\": \"(" << mesh.octree[octreeIndex].max.x << ", "
+		<< mesh.octree[octreeIndex].max.y << ", " << mesh.octree[octreeIndex].max.z << ")\"" << std::endl;
+	out << std::string(indent + 1, '\t') << "}," << std::endl;
+	out << std::string(indent + 1, '\t') << "\"trisCount\": " << mesh.octree[octreeIndex].trisCount << "," << std::endl;
+	out << std::string(indent + 1, '\t') << "\"tris\": [";
+	std::string sep = "";
+	for (int i = 0; i < mesh.octree[octreeIndex].trisCount; i++) {
+		out << sep << mesh.octreeTris[mesh.octree[octreeIndex].trisIndex + i];
+		sep = ", ";
+	}
+	out << "]," << std::endl;
+	out << std::string(indent + 1, '\t') << "\"Mathematica\": \"Show[Graphics3D[{Opacity[0.5],Cuboid[{"
+		<< mesh.octree[octreeIndex].min.x << "," << mesh.octree[octreeIndex].min.y << "," << mesh.octree[octreeIndex].min.z << "},{"
+		<< mesh.octree[octreeIndex].max.x << "," << mesh.octree[octreeIndex].max.y << "," << mesh.octree[octreeIndex].max.z
+		<< "}]}],Graphics3D[Triangle[{";
+	sep = "";
+	for (int i = 0; i < mesh.octree[octreeIndex].trisCount; i++) {
+		int triIndex = mesh.octreeTris[mesh.octree[octreeIndex].trisIndex + i];
+		out << sep << "{{" << mesh.vertices[mesh.triangles[9*triIndex+3*0]].x
+			<< "," << mesh.vertices[mesh.triangles[9 * triIndex + 3 * 0]].y
+			<< "," << mesh.vertices[mesh.triangles[9 * triIndex + 3 * 0]].z << "},{"
+			<< mesh.vertices[mesh.triangles[9 * triIndex + 3 * 1]].x
+			<< "," << mesh.vertices[mesh.triangles[9 * triIndex + 3 * 1]].y
+			<< "," << mesh.vertices[mesh.triangles[9 * triIndex + 3 * 1]].z << "},{"
+			<< mesh.vertices[mesh.triangles[9 * triIndex + 3 * 2]].x
+			<< "," << mesh.vertices[mesh.triangles[9 * triIndex + 3 * 2]].y
+			<< "," << mesh.vertices[mesh.triangles[9 * triIndex + 3 * 2]].z << "}}";
+		sep = ",";
+	}
+	out << "}]]]\"," << std::endl;
+	out << std::string(indent + 1, '\t') << "\"children\": {";
+	if (mesh.octree[octreeIndex].children[0] != -1) {
+		sep = "";
+		for (int i = 0; i < 8; i++) {
+			out << sep << std::endl;
+			out << std::string(indent + 2, '\t') << "\"" << i << "\": ";
+			json(mesh, mesh.octree[octreeIndex].children[i], out, indent + 2);
+			sep = ",";
+		}
+		out << std::endl << std::string(indent + 1, '\t');
+	}
+	out << "}" << std::endl;
+	out << std::string(indent, '\t') << "}";
+}
 
 void pickPlatform(Platform& platform, const vector<Platform>& platforms) {
 
@@ -231,6 +291,14 @@ cl_double3 normalize(const cl_double3 v) {
 	return double3(v.x / m, v.y / m, v.z / m);
 }
 
+cl_double3 operator+(const cl_double3 v1, const cl_double3 v2) {
+	return double3(
+		v1.x + v2.x,
+		v1.y + v2.y,
+		v1.z + v2.z
+	);
+}
+
 cl_double3 operator-(const cl_double3 v1, const cl_double3 v2) {
 	return double3(
 		v1.x - v2.x,
@@ -239,12 +307,305 @@ cl_double3 operator-(const cl_double3 v1, const cl_double3 v2) {
 	);
 }
 
+cl_double3 operator*(const cl_double3 v, const double c) {
+	return double3(
+		v.x * c,
+		v.y * c,
+		v.z * c
+	);
+}
+
+cl_double3 operator/(const cl_double3 v, const double c) {
+	return double3(
+		v.x / c,
+		v.y / c,
+		v.z / c
+	);
+}
+
+double dot(const cl_double3 a, const cl_double3 b) {
+	return a.x * b.x + a.y * b.y + a.z * b.z;
+}
+
 cl_double3 cross(const cl_double3 a, const cl_double3 b) {
 	return double3(
 		a.y * b.z - a.z * b.y,
 		a.z * b.x - a.x * b.z,
 		a.x * b.y - a.y * b.x
 	);
+}
+
+cl_double3 elementwise_min(const cl_double3 a, const cl_double3 b) {
+	return double3(
+		min(a.x, b.x),
+		min(a.y, b.y),
+		min(a.z, b.z)
+	);
+}
+
+cl_double3 elementwise_max(const cl_double3 a, const cl_double3 b) {
+	return double3(
+		max(a.x, b.x),
+		max(a.y, b.y),
+		max(a.z, b.z)
+	);
+}
+
+bool AABBTriangleIntersection(Mesh const& mesh, int octreeIndex, int triIndex) {
+	const cl_double3 A = mesh.vertices[mesh.triangles[9 * triIndex + 3 * 0]];
+	const cl_double3 B = mesh.vertices[mesh.triangles[9 * triIndex + 3 * 1]];
+	const cl_double3 C = mesh.vertices[mesh.triangles[9 * triIndex + 3 * 2]];
+	cl_double3 min = mesh.octree[octreeIndex].min;
+	cl_double3 max = mesh.octree[octreeIndex].max;
+	cl_double3 center = (min + max) / 2;
+	cl_double3 extents = (max - min) / 2;
+
+	cl_double3 offsetA = A - center;
+	cl_double3 offsetB = B - center;
+	cl_double3 offsetC = C - center;
+
+	cl_double3 ba = offsetB - offsetA;
+	cl_double3 cb = offsetC - offsetB;
+
+	double x_ba_abs = abs(ba.x);
+	double y_ba_abs = abs(ba.y);
+	double z_ba_abs = abs(ba.z);
+	{
+		double min = ba.z * offsetA.y - ba.y * offsetA.z;
+		double max = ba.z * offsetC.y - ba.y * offsetC.z;
+		if (min > max) {
+			double temp = min;
+			min = max;
+			max = temp;
+		}
+		double rad = z_ba_abs * extents.y + y_ba_abs * extents.z;
+		if (min > rad || max < -rad) return false;
+	}
+	{
+		double min = -ba.z * offsetA.x + ba.x * offsetA.z;
+		double max = -ba.z * offsetC.x + ba.x * offsetC.z;
+		if (min > max) {
+			double temp = min;
+			min = max;
+			max = temp;
+		}
+		double rad = z_ba_abs * extents.x + x_ba_abs * extents.z;
+		if (min > rad || max < -rad) return false;
+	}
+	{
+		double min = ba.y * offsetB.x - ba.x * offsetB.y;
+		double max = ba.y * offsetC.x - ba.x * offsetC.y;
+		if (min > max) {
+			double temp = min;
+			min = max;
+			max = temp;
+		}
+		double rad = y_ba_abs * extents.x + x_ba_abs * extents.y;
+		if (min > rad || max < -rad) return false;
+	}
+	double x_cb_abs = abs(cb.x);
+	double y_cb_abs = abs(cb.y);
+	double z_cb_abs = abs(cb.z);
+	{
+		double min = cb.z * offsetA.y - cb.y * offsetA.z,
+			max = cb.z * offsetC.y - cb.y * offsetC.z;
+		if (min > max) {
+			double temp = min;
+			min = max;
+			max = temp;
+		}
+		double rad = z_cb_abs * extents.y + y_cb_abs * extents.z;
+		if (min > rad || max < -rad) return false;
+	}
+	{
+		double min = -cb.z * offsetA.x + cb.x * offsetA.z,
+			max = -cb.z * offsetC.x + cb.x * offsetC.z;
+		if (min > max) {
+			double temp = min;
+			min = max;
+			max = temp;
+		}
+		double rad = z_cb_abs * extents.x + x_cb_abs * extents.z;
+		if (min > rad || max < -rad) return false;
+	}
+	{
+		double min = cb.y * offsetA.x - cb.x * offsetA.y,
+			max = cb.y * offsetB.x - cb.x * offsetB.y;
+		if (min > max) {
+			double temp = min;
+			min = max;
+			max = temp;
+		}
+		double rad = y_cb_abs * extents.x + x_cb_abs * extents.y;
+		if (min > rad || max < -rad) return false;
+	}
+	cl_double3 ac = offsetA - offsetC;
+	double x_ac_abs = abs(ac.x);
+	double y_ac_abs = abs(ac.y);
+	double z_ac_abs = abs(ac.z);
+	{
+		double min = ac.z * offsetA.y - ac.y * offsetA.z,
+			max = ac.z * offsetB.y - ac.y * offsetB.z;
+		if (min > max) {
+			double temp = min;
+			min = max;
+			max = temp;
+		}
+		double rad = z_ac_abs * extents.y + y_ac_abs * extents.z;
+		if (min > rad || max < -rad) return false;
+	}
+	{
+		double min = -ac.z * offsetA.x + ac.x * offsetA.z,
+			max = -ac.z * offsetB.x + ac.x * offsetB.z;
+		if (min > max) {
+			double temp = min;
+			min = max;
+			max = temp;
+		}
+		double rad = z_ac_abs * extents.x + x_ac_abs * extents.z;
+		if (min > rad || max < -rad) return false;
+	}
+	{
+		double min = ac.y * offsetB.x - ac.x * offsetB.y,
+			max = ac.y * offsetC.x - ac.x * offsetC.y;
+		if (min > max) {
+			double temp = min;
+			min = max;
+			max = temp;
+		}
+		double rad = y_ac_abs * extents.x + x_ac_abs * extents.y;
+		if (min > rad || max < -rad) return false;
+	}
+	{
+		cl_double3 normal = cross(ba, cb);
+		cl_double3 min, max;
+		if (normal.x > 0) {
+			min.x = -extents.x - offsetA.x;
+			max.x = extents.x - offsetA.x;
+		}
+		else {
+			min.x = extents.x - offsetA.x;
+			max.x = -extents.x - offsetA.x;
+		}
+		if (normal.y > 0) {
+			min.y = -extents.y - offsetA.y;
+			max.y = extents.y - offsetA.y;
+		}
+		else {
+			min.y = extents.y - offsetA.y;
+			max.y = -extents.y - offsetA.y;
+		}
+		if (normal.z > 0) {
+			min.z = -extents.z - offsetA.z;
+			max.z = extents.z - offsetA.z;
+		}
+		else {
+			min.z = extents.z - offsetA.z;
+			max.z = -extents.z - offsetA.z;
+		}
+		if (dot(normal, min) > 0) return false;
+		if (dot(normal, max) < 0) return false;
+	}
+	{
+		cl_double3 min = elementwise_min(elementwise_min(offsetA, offsetB), offsetC);
+		cl_double3 max = elementwise_max(elementwise_max(offsetA, offsetB), offsetC);
+		if (min.x > extents.x || max.x < -extents.x) return false;
+		if (min.y > extents.y || max.y < -extents.y) return false;
+		if (min.z > extents.z || max.z < -extents.z) return false;
+	}
+	return true;
+}
+
+void Subdivide(Mesh &mesh, int octreeIndex, int minTris, int depth) {
+	if (depth <= 0 || mesh.octree[octreeIndex].trisCount <= minTris) return;
+	cl_double3 extents = mesh.octree[octreeIndex].max - mesh.octree[octreeIndex].min;
+	cl_double3 half_extents = extents / 2;
+	cl_double3 ex = double3(half_extents.x, 0, 0);
+	cl_double3 ey = double3(0, half_extents.y, 0);
+	cl_double3 ez = double3(0, 0, half_extents.z);
+	for (int x = 0; x < 2; x++) {
+		for (int y = 0; y < 2; y++) {
+			for (int z = 0; z < 2; z++) {
+				Octree child;
+				child.min = mesh.octree[octreeIndex].min + ex * x + ey * y + ez * z;
+				child.max = child.min + half_extents;
+				int trisStart = mesh.octree[octreeIndex].trisIndex;
+				int trisCount = mesh.octree[octreeIndex].trisCount;
+				child.trisIndex = mesh.octreeTris.size();
+				child.trisCount = 0;
+				
+				mesh.octree[octreeIndex].children[z + 2 * y + 4 * x] = mesh.octree.size();
+				mesh.octree.push_back(child);
+				for (int tri = trisStart; tri < trisStart + trisCount; tri++) {
+					int triIndex = mesh.octreeTris[tri];
+					if (AABBTriangleIntersection(mesh, mesh.octree.size()-1, triIndex)) {
+						mesh.octreeTris.push_back(triIndex);
+						mesh.octree[mesh.octree.size()-1].trisCount++;
+					}
+				}
+			}
+		}
+	}
+	for (int x = 0; x < 2; x++) {
+		for (int y = 0; y < 2; y++) {
+			for (int z = 0; z < 2; z++) {
+				int childIndex = 4 * x + 2 * y + z;
+				int childOctreeIndex = mesh.octree[octreeIndex].children[childIndex];
+				if (z == 0) {
+					mesh.octree[childOctreeIndex].neighbors[0] = mesh.octree[octreeIndex].neighbors[0];
+					mesh.octree[childOctreeIndex].neighbors[1] = mesh.octree[octreeIndex].children[childIndex + 1];
+				}
+				else {
+					mesh.octree[childOctreeIndex].neighbors[0] = mesh.octree[octreeIndex].children[childIndex - 1];
+					mesh.octree[childOctreeIndex].neighbors[1] = mesh.octree[octreeIndex].neighbors[1];
+				}
+				if (x == 0) {
+					mesh.octree[childOctreeIndex].neighbors[2] = mesh.octree[octreeIndex].neighbors[2];
+					mesh.octree[childOctreeIndex].neighbors[3] = mesh.octree[octreeIndex].children[childIndex + 4];
+				}
+				else {
+					mesh.octree[childOctreeIndex].neighbors[2] = mesh.octree[octreeIndex].children[childIndex - 4];
+					mesh.octree[childOctreeIndex].neighbors[3] = mesh.octree[octreeIndex].neighbors[3];
+				}
+				if (y == 0) {
+					mesh.octree[childOctreeIndex].neighbors[4] = mesh.octree[octreeIndex].neighbors[4];
+					mesh.octree[childOctreeIndex].neighbors[5] = mesh.octree[octreeIndex].children[childIndex + 2];
+				}
+				else {
+					mesh.octree[childOctreeIndex].neighbors[4] = mesh.octree[octreeIndex].children[childIndex - 2];
+					mesh.octree[childOctreeIndex].neighbors[5] = mesh.octree[octreeIndex].neighbors[5];
+				}
+			}
+		}
+	}
+	for (int i = 0; i < 8; i++) {
+		Subdivide(mesh, mesh.octree[octreeIndex].children[i], minTris, depth - 1);
+	}
+}
+
+void Mesh::GenerateOctree() {
+	Octree newOctree;
+	octreeTris.clear();
+	newOctree.trisCount = 0;
+	newOctree.trisIndex = 0;
+	newOctree.min = vertices[triangles[0]];
+	newOctree.max = vertices[triangles[0]];
+	for (int i = 1; i < triangles.size() / 3; i++) {
+		cl_double3 vert = vertices[triangles[3 * i]];
+		newOctree.min = elementwise_min(newOctree.min, vert);
+		newOctree.max = elementwise_max(newOctree.max, vert);
+	}
+	for (int i = 0; i < triangles.size() / 9; i++) {
+		octreeTris.push_back(i);
+		newOctree.trisCount++;
+	}
+	octree.push_back(newOctree);
+	Subdivide(*this, 0, 6, 12);
+	/*
+	ofstream f("octree.json");
+	json(*this, 0, f, 0);
+	f.close();
+	*/
 }
 
 bool OBJReader(std::string path, Mesh &mesh) {
@@ -324,6 +685,7 @@ bool OBJReader(std::string path, Mesh &mesh) {
 		}
 		lineno++;
 	}
+	mesh.GenerateOctree();
 	return true;
 }
 
@@ -400,7 +762,7 @@ void TRS(Object *object, cl_double3 translation, double angle, cl_double3 axis, 
 }
 
 void initScene(Object* cpu_objects) {
-	if (!OBJReader("models/pear.obj", theMesh)) {
+	if (!OBJReader("models/StanfordBunny.obj", theMesh)) {
 		exit(EXIT_FAILURE);
 	}
 
@@ -467,9 +829,11 @@ void initCLKernel(){
 	kernel.setArg(3, cl_normals);
 	kernel.setArg(4, cl_triangles);
 	kernel.setArg(5, (unsigned int)(theMesh.triangles.size()/9));
-	kernel.setArg(6, window_width);
-	kernel.setArg(7, window_height);
-	kernel.setArg(8, cl_vbo);
+	kernel.setArg(6, cl_octrees);
+	kernel.setArg(7, cl_octreeTris);
+	kernel.setArg(8, window_width);
+	kernel.setArg(9, window_height);
+	kernel.setArg(10, cl_vbo);
 }
 
 void runKernel(){
@@ -512,7 +876,12 @@ unsigned int WangHash(unsigned int a) {
 
 
 void render(){
+	
 	framenumber++;
+
+	clock_end = std::chrono::high_resolution_clock::now();
+	int ms = std::chrono::duration_cast<std::chrono::milliseconds>(clock_end - clock_start).count();
+	std::cout << 1000.0 * framenumber / ms << " fps \t" << ms / 1000.0 << "s" << std::endl;
 
 	int new_window_width = glutGet(GLUT_WINDOW_WIDTH),
 	    new_window_height = glutGet(GLUT_WINDOW_HEIGHT);
@@ -533,7 +902,7 @@ void render(){
 		initCLKernel();
 	}
 
-	TRS(&cpu_objects[6], double3(0, 0, 12), framenumber/100.0, double3(0, 1, 0), double3(1, 1, 1));
+	TRS(&cpu_objects[6], double3(0, -1, 8),ms / 1000.0, double3(0, 1, 0), double3(15, 15, 15));
 
 	queue.enqueueWriteBuffer(cl_objects, CL_TRUE, 0, object_count * sizeof(Object), cpu_objects);
 
@@ -542,6 +911,7 @@ void render(){
 	runKernel();
 
 	drawGL();
+
 }
 
 void cleanUp(){
@@ -581,6 +951,12 @@ void main(int argc, char** argv){
 	cl_triangles = Buffer(context, CL_MEM_READ_ONLY, theMesh.triangles.size() * sizeof(unsigned int));
 	queue.enqueueWriteBuffer(cl_triangles, CL_TRUE, 0, theMesh.triangles.size() * sizeof(unsigned int), &theMesh.triangles[0]);
 
+	cl_octrees = Buffer(context, CL_MEM_READ_ONLY, theMesh.octree.size() * sizeof(Octree));
+	queue.enqueueWriteBuffer(cl_octrees, CL_TRUE, 0, theMesh.octree.size() * sizeof(Octree), &theMesh.octree[0]);
+	
+	cl_octreeTris = Buffer(context, CL_MEM_READ_ONLY, theMesh.octreeTris.size() * sizeof(int));
+	queue.enqueueWriteBuffer(cl_octreeTris, CL_TRUE, 0, theMesh.octreeTris.size() * sizeof(int), &theMesh.octreeTris[0]);
+
 
 	// create OpenCL buffer from OpenGL vertex buffer object
 	cl_vbo = BufferGL(context, CL_MEM_WRITE_ONLY, vbo);
@@ -588,6 +964,8 @@ void main(int argc, char** argv){
 
 	// intitialise the kernel
 	initCLKernel();
+
+	clock_start = std::chrono::high_resolution_clock::now();
 
 	// start rendering continuously
 	glutMainLoop();
