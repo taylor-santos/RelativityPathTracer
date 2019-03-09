@@ -18,8 +18,11 @@ typedef struct Object {
 	double4 M[4];
 	double4 InvM[4];
 	float3 color;
-	int meshIndex;
 	enum objectType type;
+	int meshIndex;
+	int textureIndex;
+	int textureWidth;
+	int textureHeight;
 } Object;
 
 typedef struct Hit {
@@ -82,6 +85,7 @@ double3 applyTranspose(const double4 M[4], const double3 v) {
 }
 
 private int getChildIndex(int side, double3 *uv) {
+	//int childIndex = round(uv->z) + 2 * round(uv->y) + 4 * round(uv->x);
 	switch (side) {
 	case 0:
 		if (uv->x < 0.5) {
@@ -328,6 +332,7 @@ bool intersect_octree(
 	const int index,
 	global const double3 *vertices,
 	global const double3 *normals,
+	global const double2 *uvs,
 	global const unsigned int *triangles,
 	global const Octree *octrees,
 	global const int *octreeTris,
@@ -376,7 +381,10 @@ bool intersect_octree(
 					double u = newHit.uv.s0;
 					double v = newHit.uv.s1;
 					newHit.normal = (1.0 - u - v)*normA + u * normB + v * normC;
-					newHit.color = convert_float3((newHit.normal + 1) / 2);
+					double2 uvA = uvs[triangles[1 + 9 * tri + 3 * 0]];
+					double2 uvB = uvs[triangles[1 + 9 * tri + 3 * 1]];
+					double2 uvC = uvs[triangles[1 + 9 * tri + 3 * 2]];
+					newHit.uv = (1.0 - u - v)*uvA + u * uvB + v * uvC;
 					*hit = newHit;
 					didHit = true;
 				}
@@ -420,18 +428,26 @@ bool intersect_cube(global const Object *objects, int index, const Ray *ray, Hit
 	if (tmin > 0.0 && tmax > tmin) {
 		double3 pt = origin + dir * tmin;
 		double3 normal = (double3)(0, 0, 0);
+		double2 uv = (double2)(0, 0);
 		if (pt.x*pt.x - 1 < EPSILON && pt.x*pt.x - 1 > -EPSILON) {
 			normal.x = round(pt.x);
-		}else if (pt.y*pt.y - 1 < EPSILON && pt.y*pt.y - 1 > -EPSILON) {
+			uv.s0 = (pt.y + 1) / 2.0;
+			uv.s1 = (pt.z + 1) / 2.0;
+		}
+		else if (pt.y*pt.y - 1 < EPSILON && pt.y*pt.y - 1 > -EPSILON) {
 			normal.y = round(pt.y);
+			uv.s0 = (pt.x + 1) / 2.0;
+			uv.s1 = (pt.z + 1) / 2.0;
 		}
 		else if (pt.z*pt.z - 1 < EPSILON && pt.z*pt.z - 1 > -EPSILON) {
 			normal.z = round(pt.z);
+			uv.s0 = (pt.x + 1) / 2.0;
+			uv.s1 = (pt.y + 1) / 2.0;
 		}
 		double3 worldPt = transformPoint(objects[index].M, pt);
 		hit->dist = length(worldPt);
 		hit->normal = normalize(applyTranspose(objects[index].InvM, normal));
-		hit->color = objects[index].color;
+		hit->uv = uv;
 		return true;
 	}
 	return false;
@@ -457,7 +473,8 @@ bool intersect_sphere(global const Object *objects, const int index, const Ray *
 	double3 worldPt = transformPoint(objects[index].M, objPt);
 	hit->dist = length(worldPt);
 	hit->normal = normalize(applyTranspose(objects[index].InvM, objPt));
-	hit->color = objects[index].color;
+	hit->uv.s0 = 0.5 + atan2(objPt.z, objPt.x) / (2 * M_PI);
+	hit->uv.s1 = asin(objPt.y) / M_PI + 0.5;
 	return true;
 }
 
@@ -466,9 +483,11 @@ bool intersect_scene(
 	const int object_count,
 	global const double3 *vertices,
 	global const double3 *normals,
+	global const double2 *uvs,
 	global const unsigned int *triangles,
 	global const Octree *octrees,
 	global const int *octreeTris,
+	global const unsigned char *textures,
 	const Ray *ray,
 	Hit *hit
 ) {
@@ -478,7 +497,7 @@ bool intersect_scene(
 
 	float inf = 1e20;
 	hit->dist = inf;
-
+	bool didHit = false;
 	/* check if the ray intersects each object in the scene */
 	for (int i = 0; i < object_count; i++) {
 		Hit newHit;
@@ -486,31 +505,51 @@ bool intersect_scene(
 		switch (objects[i].type) {
 		case SPHERE:
 			if (intersect_sphere(objects, i, ray, &newHit)) {
-				if (newHit.dist > 0.0f && newHit.dist < hit->dist) {
+				if (newHit.dist < hit->dist) {
 					*hit = newHit;
 					hit->object = i;
+					didHit = true;
 				}
 			}
 			break;
 		case CUBE:
 			if (intersect_cube(objects, i, ray, &newHit)) {
-				if (newHit.dist > 0.0f && newHit.dist < hit->dist) {
+				if (newHit.dist < hit->dist) {
 					*hit = newHit;
 					hit->object = i;
+					didHit = true;
 				}
 			}
 			break;
 		case MESH:
-			if (intersect_octree(objects, i, vertices, normals, triangles, octrees, octreeTris, ray, &newHit)) {
+			if (intersect_octree(objects, i, vertices, normals, uvs, triangles, octrees, octreeTris, ray, &newHit)) {
 				if (newHit.dist < hit->dist) {
 					*hit = newHit;
 					hit->object = i;
+					didHit = true;
 				}
 			}
 			break;
 		}
 	}
-	return hit->dist < inf; /* true when ray interesects the scene */
+	if (didHit) {
+		if (objects[hit->object].textureIndex != -1) {
+			int width = objects[hit->object].textureWidth;
+			int x = width * hit->uv.s0;
+			int y = objects[hit->object].textureHeight * (1.0 - hit->uv.s1);
+			int offset = objects[hit->object].textureIndex;
+			hit->color = (float3)(
+				textures[offset + 3 * (width * y + x) + 0] / 255.0,
+				textures[offset + 3 * (width * y + x) + 1] / 255.0,
+				textures[offset + 3 * (width * y + x) + 2] / 255.0
+			);
+		}
+		else {
+			hit->color = objects[hit->object].color;
+		}
+		return true;
+	}
+	return false;
 }
 
 
@@ -524,13 +563,15 @@ float3 trace(
 	const int object_count,
 	global const double3 *vertices,
 	global const double3 *normals,
+	global const double2 *uvs,
 	global const unsigned int *triangles,
 	global const Octree *octrees,
 	global const int *octreeTris,
+	global const unsigned char *textures,
 	const Ray* camray
 ) {
 	Hit hit;
-	if (!intersect_scene(objects, object_count, vertices, normals, triangles, octrees, octreeTris, camray, &hit))
+	if (!intersect_scene(objects, object_count, vertices, normals, uvs, triangles, octrees, octreeTris, textures, camray, &hit))
 		return (float3)(0.15f, 0.15f, 0.25f);
 
 	double3 hitpoint = camray->origin + camray->dir * hit.dist;
@@ -538,12 +579,13 @@ float3 trace(
 
 	float3 color = hit.color * 0.5f;
 
+	/*
 	if (objects[hit.object].type == MESH) {
 		Ray reflectRay;
 		reflectRay.dir = camray->dir - 2 * normal * dot(normal, camray->dir);
 		reflectRay.origin = hitpoint + reflectRay.dir * 0.001;
 
-		if (!intersect_scene(objects, object_count, vertices, normals, triangles, octrees, octreeTris, &reflectRay, &hit))
+		if (!intersect_scene(objects, object_count, vertices, normals, uvs, triangles, octrees, octreeTris, textures, &reflectRay, &hit))
 			return (float3)(0.15f, 0.15f, 0.25f);
 
 		hitpoint = reflectRay.origin + reflectRay.dir * hit.dist;
@@ -551,8 +593,9 @@ float3 trace(
 
 		color += hit.color * 0.2f;
 	}
+	*/
 	
-	double3 light_pos = (double3)(0, -1, 7);
+	double3 light_pos = (double3)(-2, 2, 4);
 	double3 light_dir = hitpoint - light_pos;
 	
 	Ray lightRay;
@@ -561,9 +604,9 @@ float3 trace(
 
 	Hit newHit;
 	if (dot(normal, -light_dir) > 0) {
-		bool didHit = intersect_scene(objects, object_count, vertices, normals, triangles, octrees, octreeTris, &lightRay, &newHit);
+		bool didHit = intersect_scene(objects, object_count, vertices, normals, uvs, triangles, octrees, octreeTris, textures, &lightRay, &newHit);
 		if (didHit && newHit.object == hit.object) {
-			color += (float)dot(normal, -lightRay.dir) * hit.color;
+			color += (float)(0.8*dot(normal, -lightRay.dir)) * hit.color;
 		}
 	}
 	return color;
@@ -576,9 +619,11 @@ __kernel void render_kernel(
 	const int object_count,
 	global const double3 *vertices,
 	global const double3 *normals,
+	global const double2 *uvs,
 	global const int *triangles,
 	global const Octree *octrees,
 	global const int *octreeTris,
+	global const unsigned char *textures,
 	const int width,
 	const int height,
 	__global float3* output
@@ -593,7 +638,7 @@ __kernel void render_kernel(
 		for (int x = 0; x < MSAASAMPLES; x++) {
 			Ray camray = createCamRay((double)x_coord + (double)x/MSAASAMPLES, (double)y_coord + (double)y/ MSAASAMPLES, width, height);
 
-			finalcolor += trace(objects, object_count, vertices, normals, triangles, octrees, octreeTris, &camray);
+			finalcolor += trace(objects, object_count, vertices, normals, uvs, triangles, octrees, octreeTris, textures, &camray);
 		}
 	}
 	finalcolor = finalcolor / (MSAASAMPLES*MSAASAMPLES);
@@ -605,7 +650,6 @@ __kernel void render_kernel(
 		(unsigned char)(min(finalcolor.y, 1.0f) * 255),
 		(unsigned char)(min(finalcolor.z, 1.0f) * 255),
 		1);
-
 	/* store the pixelcolour in the output buffer */
 	output[work_item_id] = (float3)(x_coord, y_coord, fcolour.c);
 }

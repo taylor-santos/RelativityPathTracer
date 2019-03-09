@@ -7,38 +7,39 @@
 #include <vector>
 #include <array>
 #include <Windows.h>
-#include "gl_interop.h"
 #include <CL\cl.hpp>
 #include <chrono>
 #include <map>
 
+#include "gl_interop.h"
+#define cimg_use_jpeg
+#include "CImg.h"
+
 // TODO
 // cleanup()
 // check for cl-gl interop
-
-using namespace std;
-using namespace cl;
 
 const int object_count = 8;
 
 std::chrono::time_point<std::chrono::high_resolution_clock> clock_start, clock_end;
 
 // OpenCL objects
-Device device;
-CommandQueue queue;
-Kernel kernel;
-Context context;
-Program program;
-Buffer cl_output;
-Buffer cl_objects;
-Buffer cl_vertices;
-Buffer cl_normals;
-Buffer cl_uvs;
-Buffer cl_triangles;
-Buffer cl_octrees;
-Buffer cl_octreeTris;
-BufferGL cl_vbo;
-vector<Memory> cl_vbos;
+cl::Device device;
+cl::CommandQueue queue;
+cl::Kernel kernel;
+cl::Context context;
+cl::Program program;
+cl::Buffer cl_output;
+cl::Buffer cl_objects;
+cl::Buffer cl_vertices;
+cl::Buffer cl_normals;
+cl::Buffer cl_uvs;
+cl::Buffer cl_triangles;
+cl::Buffer cl_octrees;
+cl::Buffer cl_octreeTris;
+cl::Buffer cl_textures;
+cl::BufferGL cl_vbo;
+std::vector<cl::Memory> cl_vbos;
 
 // image buffer (not needed with real-time viewport)
 cl_float4* cpu_output;
@@ -58,9 +59,12 @@ struct Object
 	cl_double4 M[4];
 	cl_double4 InvM[4];
 	cl_float3 color;
-	int meshIndex;
 	enum objectType type;
-	cl_float dummy;
+	int meshIndex;
+	int textureIndex = -1;
+	int textureWidth;
+	int textureHeight;
+	char dummy[24];
 };
 
 Object cpu_objects[object_count];
@@ -90,7 +94,28 @@ struct Mesh
 
 Mesh theMesh;
 
-void json(Mesh const& mesh, const unsigned int octreeIndex, ostream &out, const unsigned int indent) {
+std::vector<unsigned char> textures;
+std::vector<int> textureValues; // {index, width, height}
+
+bool ReadTexture(std::string path) {
+	using namespace cimg_library;
+	cimg::exception_mode(0);
+	try {
+		CImg<unsigned char> image(path.c_str());
+		image.permute_axes("cxyz");
+		textureValues.push_back(textures.size());
+		textureValues.push_back(image._height); // Texture width
+		textureValues.push_back(image._depth);  // Texture height
+		textures.insert(textures.end(), image._data, image._data + 3 * image._height * image._depth);
+		return true;
+	}
+	catch (CImgException &e) {
+		std::cerr << e.what() << std::endl;
+		return false;
+	}
+}
+
+void json(Mesh const& mesh, const unsigned int octreeIndex, std::ostream &out, const unsigned int indent) {
 	out << "{" << std::endl;
 	out << std::string(indent + 1, '\t') << "\"bounds\": {" << std::endl;
 	out << std::string(indent + 2, '\t') << "\"min\": \"(" << mesh.octree[octreeIndex].min.x << ", "
@@ -140,93 +165,79 @@ void json(Mesh const& mesh, const unsigned int octreeIndex, ostream &out, const 
 	out << std::string(indent, '\t') << "}";
 }
 
-void pickPlatform(Platform& platform, const vector<Platform>& platforms) {
+void pickPlatform(cl::Platform& platform, const std::vector<cl::Platform>& platforms) {
 
 	if (platforms.size() == 1) platform = platforms[0];
 	else{
 		int input = 0;
-		cout << "\nChoose an OpenCL platform: ";
-		cin >> input;
+		std::cout << "\nChoose an OpenCL platform: ";
+		std::cin >> input;
 
 		// handle incorrect user input
 		while (input < 1 || input > platforms.size()){
-			cin.clear(); //clear errors/bad flags on cin
-			cin.ignore(cin.rdbuf()->in_avail(), '\n'); // ignores exact number of chars in cin buffer
-			cout << "No such option. Choose an OpenCL platform: ";
-			cin >> input;
+			std::cin.clear(); //clear errors/bad flags on cin
+			std::cin.ignore(std::cin.rdbuf()->in_avail(), '\n'); // ignores exact number of chars in cin buffer
+			std::cout << "No such option. Choose an OpenCL platform: ";
+			std::cin >> input;
 		}
 		platform = platforms[input - 1];
 	}
 }
 
-void pickDevice(Device& device, const vector<Device>& devices){
+void pickDevice(cl::Device& device, const std::vector<cl::Device>& devices){
 
 	if (devices.size() == 1) device = devices[0];
 	else{
 		int input = 0;
-		cout << "\nChoose an OpenCL device: ";
-		cin >> input;
+		std::cout << "\nChoose an OpenCL device: ";
+		std::cin >> input;
 
 		// handle incorrect user input
 		while (input < 1 || input > devices.size()){
-			cin.clear(); //clear errors/bad flags on cin
-			cin.ignore(cin.rdbuf()->in_avail(), '\n'); // ignores exact number of chars in cin buffer
-			cout << "No such option. Choose an OpenCL device: ";
-			cin >> input;
+			std::cin.clear(); //clear errors/bad flags on cin
+			std::cin.ignore(std::cin.rdbuf()->in_avail(), '\n'); // ignores exact number of chars in cin buffer
+			std::cout << "No such option. Choose an OpenCL device: ";
+			std::cin >> input;
 		}
 		device = devices[input - 1];
 	}
 }
 
-void printErrorLog(const Program& program, const Device& device){
-
-	// Get the error log and print to console
-	string buildlog = program.getBuildInfo<CL_PROGRAM_BUILD_LOG>(device);
-	cerr << "Build log:" << std::endl << buildlog << std::endl;
-
-	// Print the error log to a file
-	FILE *log = fopen("errorlog.txt", "w");
-	fprintf(log, "%s\n", buildlog);
-	cout << "Error log saved in 'errorlog.txt'" << endl;
-	system("PAUSE");
-	exit(1);
-}
-
 void initOpenCL()
 {
 	// Get all available OpenCL platforms (e.g. AMD OpenCL, Nvidia CUDA, Intel OpenCL)
-	vector<Platform> platforms;
-	Platform::get(&platforms);
-	cout << "Available OpenCL platforms : " << endl << endl;
+	std::vector<cl::Platform> platforms;
+	cl::Platform::get(&platforms);
+	std::cout << "Available OpenCL platforms : " << std::endl << std::endl;
 	for (int i = 0; i < platforms.size(); i++)
-		cout << "\t" << i + 1 << ": " << platforms[i].getInfo<CL_PLATFORM_NAME>() << endl;
+		std::cout << "\t" << i + 1 << ": " << platforms[i].getInfo<CL_PLATFORM_NAME>() << std::endl;
 
-	cout << endl << "WARNING: " << endl << endl;
-	cout << "OpenCL-OpenGL interoperability is only tested " << endl;
-	cout << "on discrete GPUs from Nvidia and AMD" << endl;
-	cout << "Other devices (such as Intel integrated GPUs) may fail" << endl << endl;
+	std::cout << std::endl << "WARNING: " << std::endl << std::endl;
+	std::cout << "OpenCL-OpenGL interoperability is only tested " << std::endl;
+	std::cout << "on discrete GPUs from Nvidia and AMD" << std::endl;
+	std::cout << "Other devices (such as Intel integrated GPUs) may fail" << std::endl << std::endl;
 
 	// Pick one platform
-	Platform platform;
+	cl::Platform platform;
 	pickPlatform(platform, platforms);
-	cout << "\nUsing OpenCL platform: \t" << platform.getInfo<CL_PLATFORM_NAME>() << endl;
+	std::cout << "\nUsing OpenCL platform: \t" << platform.getInfo<CL_PLATFORM_NAME>() << std::endl;
 
 	// Get available OpenCL devices on platform
-	vector<Device> devices;
+	std::vector<cl::Device> devices;
 	platform.getDevices(CL_DEVICE_TYPE_GPU, &devices);
 
-	cout << "Available OpenCL devices on this platform: " << endl << endl;
+	std::cout << "Available OpenCL devices on this platform: " << std::endl << std::endl;
 	for (int i = 0; i < devices.size(); i++){
-		cout << "\t" << i + 1 << ": " << devices[i].getInfo<CL_DEVICE_NAME>() << endl;
-		cout << "\t\tMax compute units: " << devices[i].getInfo<CL_DEVICE_MAX_COMPUTE_UNITS>() << endl;
-		cout << "\t\tMax work group size: " << devices[i].getInfo<CL_DEVICE_MAX_WORK_GROUP_SIZE>() << endl << endl;
+		std::cout << "\t" << i + 1 << ": " << devices[i].getInfo<CL_DEVICE_NAME>() << std::endl;
+		std::cout << "\t\tMax compute units: " << devices[i].getInfo<CL_DEVICE_MAX_COMPUTE_UNITS>() << std::endl;
+		std::cout << "\t\tMax work group size: " << devices[i].getInfo<CL_DEVICE_MAX_WORK_GROUP_SIZE>() << std::endl << std::endl;
 	}
 
 
 	// Pick one device
 	//Device device;
 	pickDevice(device, devices);
-	cout << "\nUsing OpenCL device: \t" << device.getInfo<CL_DEVICE_NAME>() << endl;
+	std::cout << "\nUsing OpenCL device: \t" << device.getInfo<CL_DEVICE_NAME>() << std::endl;
 
 	// Create an OpenCL context on that device.
 	// Windows specific OpenCL-OpenGL interop
@@ -238,31 +249,30 @@ void initOpenCL()
 		0
 	};
 
-	context = Context(device, properties);
+	context = cl::Context(device, properties);
 
 	// Create a command queue
-	queue = CommandQueue(context, device);
+	queue = cl::CommandQueue(context, device);
 
 	
 	// Convert the OpenCL source code to a string// Convert the OpenCL source code to a string
 	
-	ifstream file("opencl_kernel.cl");
+	std::ifstream file("opencl_kernel.cl");
 	if (!file){
-		cout << "\nNo OpenCL file found!" << endl << "Exiting..." << endl;
+		std::cout << "\nNo OpenCL file found!" << std::endl << "Exiting..." << std::endl;
 		system("PAUSE");
 		exit(1);
 	}
-	string source{std::istreambuf_iterator<char>(file), std::istreambuf_iterator<char>()};
+	std::string source{std::istreambuf_iterator<char>(file), std::istreambuf_iterator<char>()};
 
 	const char* kernel_source = source.c_str();
 
 	// Create an OpenCL program with source
-	program = Program(context, kernel_source);
+	program = cl::Program(context, kernel_source);
 
 	// Build the program for the selected device 
 	cl_int result = program.build({ device }); // "-cl-fast-relaxed-math"
-	if (result) cout << "Error during compilation OpenCL code!!!\n (" << result << ")" << endl;
-	if (result == CL_BUILD_PROGRAM_FAILURE) printErrorLog(program, device);
+	if (result) std::cout << "Error during compilation OpenCL code!!!\n (" << result << ")" << std::endl;
 }
 
 #define float3(x, y, z) {{x, y, z}}  // macro to replace ugly initializer braces
@@ -615,9 +625,9 @@ void Mesh::GenerateOctree(int firstTriIndex) {
 	*/
 }
 
-bool OBJReader(std::string path, Mesh &mesh) {
+bool ReadOBJ(std::string path, Mesh &mesh) {
 	if (path.substr(path.size() - 4, 4) != ".obj") return false;
-	ifstream file(path);
+	std::ifstream file(path);
 	if (!file) {
 		perror("Error opening OBJ file");
 		return false;
@@ -790,14 +800,18 @@ void TRS(Object *object, cl_double3 translation, double angle, cl_double3 axis, 
 }
 
 void initScene(Object* cpu_objects) {
-	if (!OBJReader("models/pear.obj", theMesh)) {
+	if (!ReadTexture("textures/Earth.jpg")) {
 		exit(EXIT_FAILURE);
 	}
-	if (!OBJReader("models/bunny.obj", theMesh)) {
+	if (!ReadTexture("textures/StanfordBunnyTerracotta.jpg")) {
 		exit(EXIT_FAILURE);
 	}
-
-
+	if (!ReadOBJ("models/pear.obj", theMesh)) {
+		exit(EXIT_FAILURE);
+	}
+	if (!ReadOBJ("models/StanfordBunny.obj", theMesh)) {
+		exit(EXIT_FAILURE);
+	}
 	queue.enqueueWriteBuffer(cl_objects, CL_TRUE, 0, object_count * sizeof(Object), cpu_objects);
 
 	// left wall
@@ -826,21 +840,27 @@ void initScene(Object* cpu_objects) {
 	TRS(&cpu_objects[4], double3(0, 0, 16), 0, double3(0, 1, 0), double3(10, 10, 0.1f));
 
 	// Pear
-	cpu_objects[5].color = float3(1, 1, 1);
+	cpu_objects[5].color = float3(169/255.0, 168/255.0, 54/255.0);
 	cpu_objects[5].type = MESH;
 	cpu_objects[5].meshIndex = theMesh.meshIndices[0];
 	TRS(&cpu_objects[5], double3(-3, -4.75f, 12), 0, double3(0, 1, 0), double3(0.01, 0.01, 0.01));
 
-	// Rabbit
+	// Bunny
 	cpu_objects[6].color = float3(1.0f, 0.2f, 0.9f);
-	cpu_objects[6].type = SPHERE;
+	cpu_objects[6].type = MESH;
 	cpu_objects[6].meshIndex = theMesh.meshIndices[1];
-	TRS(&cpu_objects[6], double3(1, -0.14f, 7), 0, double3(1, 0, 0), double3(10, 10, -10));
+	cpu_objects[6].textureIndex = textureValues[3];
+	cpu_objects[6].textureWidth = textureValues[4];
+	cpu_objects[6].textureHeight = textureValues[5];
+	TRS(&cpu_objects[6], double3(2, -1.5, 4), 0, double3(1, 0, 0), double3(10, 10, -10));
 
-	// lightsource
+	// Sphere
 	cpu_objects[7].color = float3(0.0f, 1.0f, 0.0f);
 	cpu_objects[7].type = SPHERE;
-	TRS(&cpu_objects[7], double3(0, 3, 15), 0, double3(0, 1, 0), double3(1, 1, 1));
+	cpu_objects[7].textureIndex = textureValues[0];
+	cpu_objects[7].textureWidth = textureValues[1];
+	cpu_objects[7].textureHeight = textureValues[2];
+	TRS(&cpu_objects[7], double3(0, 0, 10), 0, double3(0, 1, 0), double3(0.5, 0.5, 0.5));
 }
 
 void initCLKernel(){
@@ -849,19 +869,21 @@ void initCLKernel(){
 	unsigned int rendermode = 1;
 
 	// Create a kernel (entry point in the OpenCL source program)
-	kernel = Kernel(program, "render_kernel");
+	kernel = cl::Kernel(program, "render_kernel");
 
 	// specify OpenCL kernel arguments
 	kernel.setArg(0, cl_objects);
 	kernel.setArg(1, object_count);
 	kernel.setArg(2, cl_vertices);
 	kernel.setArg(3, cl_normals);
-	kernel.setArg(4, cl_triangles);
-	kernel.setArg(5, cl_octrees);
-	kernel.setArg(6, cl_octreeTris);
-	kernel.setArg(7, window_width);
-	kernel.setArg(8, window_height);
-	kernel.setArg(9, cl_vbo);
+	kernel.setArg(4, cl_uvs);
+	kernel.setArg(5, cl_triangles);
+	kernel.setArg(6, cl_octrees);
+	kernel.setArg(7, cl_octreeTris);
+	kernel.setArg(8, cl_textures);
+	kernel.setArg(9, window_width);
+	kernel.setArg(10, window_height);
+	kernel.setArg(11, cl_vbo);
 }
 
 void runKernel(){
@@ -925,7 +947,7 @@ void render(){
 		glBindBuffer(GL_ARRAY_BUFFER, vbo);
 		unsigned int size = window_width * window_height * sizeof(cl_float3);
 		glBufferData(GL_ARRAY_BUFFER, size, 0, GL_DYNAMIC_DRAW);
-		cl_vbo = BufferGL(context, CL_MEM_WRITE_ONLY, vbo);
+		cl_vbo = cl::BufferGL(context, CL_MEM_WRITE_ONLY, vbo);
 		cl_vbos[0] = cl_vbo;
 		initCLKernel();
 	}
@@ -936,9 +958,7 @@ void render(){
 
 	//TRS(&cpu_objects[7], double3(sin(ms/1000.0), -1 + cos(ms / 1000.0), 12*sin(ms/2000.0)), 0, double3(0, 1, 0), double3(0.5, 0.5, 0.5));
 	//TRS(&cpu_objects[7], double3(-6, 5, 16 + 2*sin(ms/2000.0)), 0, double3(0, 1, 0), double3(0.5, 0.5, 0.5));
-
-	TRS(&cpu_objects[6], double3(3 * sin(ms/1000.0), -1, 7), 0, double3(0, 1, 0), double3(0.10, 0.10, -0.10));
-	TRS(&cpu_objects[7], double3(2, -1, 7), 0, double3(0, 1, 0), double3(0.5, 0.5, 0.5));
+	TRS(&cpu_objects[7], double3(-1, -0.5, 3), ms/1000.0, double3(0, 1, 0), double3(0.5, 0.5, 0.5));
 
 	queue.enqueueWriteBuffer(cl_objects, CL_TRUE, 0, object_count * sizeof(Object), cpu_objects);
 
@@ -955,10 +975,9 @@ void cleanUp(){
 }
 
 void main(int argc, char** argv){
-
 	// initialise OpenGL (GLEW and GLUT window + callback functions)
 	initGL(argc, argv);
-	cout << "OpenGL initialized \n";
+	std::cout << "OpenGL initialized \n";
 
 	// initialise OpenCL
 	initOpenCL();
@@ -975,27 +994,32 @@ void main(int argc, char** argv){
 	// initialise scene
 	initScene(cpu_objects);
 
-	cl_objects = Buffer(context, CL_MEM_READ_ONLY, object_count * sizeof(Object));
+	cl_objects = cl::Buffer(context, CL_MEM_READ_ONLY, object_count * sizeof(Object));
 	queue.enqueueWriteBuffer(cl_objects, CL_TRUE, 0, object_count * sizeof(Object), cpu_objects);
 
-	cl_vertices = Buffer(context, CL_MEM_READ_ONLY, theMesh.vertices.size() * sizeof(cl_double3));
+	cl_vertices = cl::Buffer(context, CL_MEM_READ_ONLY, theMesh.vertices.size() * sizeof(cl_double3));
 	queue.enqueueWriteBuffer(cl_vertices, CL_TRUE, 0, theMesh.vertices.size() * sizeof(cl_double3), &theMesh.vertices[0]);
 
-	cl_normals = Buffer(context, CL_MEM_READ_ONLY, theMesh.normals.size() * sizeof(cl_double3));
+	cl_normals = cl::Buffer(context, CL_MEM_READ_ONLY, theMesh.normals.size() * sizeof(cl_double3));
 	queue.enqueueWriteBuffer(cl_normals, CL_TRUE, 0, theMesh.normals.size() * sizeof(cl_double3), &theMesh.normals[0]);
+	
+	cl_uvs = cl::Buffer(context, CL_MEM_READ_ONLY, theMesh.uvs.size() * sizeof(cl_double2));
+	queue.enqueueWriteBuffer(cl_uvs, CL_TRUE, 0, theMesh.uvs.size() * sizeof(cl_double2), &theMesh.uvs[0]);
 
-	cl_triangles = Buffer(context, CL_MEM_READ_ONLY, theMesh.triangles.size() * sizeof(unsigned int));
+	cl_triangles = cl::Buffer(context, CL_MEM_READ_ONLY, theMesh.triangles.size() * sizeof(unsigned int));
 	queue.enqueueWriteBuffer(cl_triangles, CL_TRUE, 0, theMesh.triangles.size() * sizeof(unsigned int), &theMesh.triangles[0]);
 
-	cl_octrees = Buffer(context, CL_MEM_READ_ONLY, theMesh.octree.size() * sizeof(Octree));
+	cl_octrees = cl::Buffer(context, CL_MEM_READ_ONLY, theMesh.octree.size() * sizeof(Octree));
 	queue.enqueueWriteBuffer(cl_octrees, CL_TRUE, 0, theMesh.octree.size() * sizeof(Octree), &theMesh.octree[0]);
 	
-	cl_octreeTris = Buffer(context, CL_MEM_READ_ONLY, theMesh.octreeTris.size() * sizeof(int));
+	cl_octreeTris = cl::Buffer(context, CL_MEM_READ_ONLY, theMesh.octreeTris.size() * sizeof(int));
 	queue.enqueueWriteBuffer(cl_octreeTris, CL_TRUE, 0, theMesh.octreeTris.size() * sizeof(int), &theMesh.octreeTris[0]);
 
+	cl_textures = cl::Buffer(context, CL_MEM_READ_ONLY, textures.size() * sizeof(unsigned char));
+	queue.enqueueWriteBuffer(cl_textures, CL_TRUE, 0, textures.size() * sizeof(unsigned char), &textures[0]);
 
 	// create OpenCL buffer from OpenGL vertex buffer object
-	cl_vbo = BufferGL(context, CL_MEM_WRITE_ONLY, vbo);
+	cl_vbo = cl::BufferGL(context, CL_MEM_WRITE_ONLY, vbo);
 	cl_vbos.push_back(cl_vbo);
 
 	// intitialise the kernel
