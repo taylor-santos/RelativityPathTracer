@@ -21,7 +21,7 @@
 
 const int object_count = 8;
 
-std::chrono::time_point<std::chrono::high_resolution_clock> clock_start, clock_end;
+std::chrono::time_point<std::chrono::high_resolution_clock> clock_start, clock_end, clock_prev;
 
 // OpenCL objects
 cl::Device device;
@@ -540,14 +540,26 @@ void Subdivide(Mesh &mesh, int octreeIndex, int minTris, int depth) {
 	cl_double3 ex = double3(half_extents.x, 0, 0);
 	cl_double3 ey = double3(0, half_extents.y, 0);
 	cl_double3 ez = double3(0, 0, half_extents.z);
+	int trisStart = mesh.octree[octreeIndex].trisIndex;
+	int trisCount = mesh.octree[octreeIndex].trisCount;
+	std::map<int, int> trisPerVertex;
+	int maxTrisPerVertex = 0;
+	for (int tri = trisStart; tri < trisStart + trisCount; tri++) {
+		int triIndex = mesh.octreeTris[tri];
+		trisPerVertex[mesh.triangles[9 * triIndex + 3 * 0]]++;
+		trisPerVertex[mesh.triangles[9 * triIndex + 3 * 1]]++;
+		trisPerVertex[mesh.triangles[9 * triIndex + 3 * 2]]++;
+		maxTrisPerVertex = max(maxTrisPerVertex, trisPerVertex[mesh.triangles[9 * triIndex + 3 * 0]]);
+		maxTrisPerVertex = max(maxTrisPerVertex, trisPerVertex[mesh.triangles[9 * triIndex + 3 * 1]]);
+		maxTrisPerVertex = max(maxTrisPerVertex, trisPerVertex[mesh.triangles[9 * triIndex + 3 * 2]]);
+	}
 	for (int x = 0; x < 2; x++) {
 		for (int y = 0; y < 2; y++) {
 			for (int z = 0; z < 2; z++) {
 				Octree child;
 				child.min = mesh.octree[octreeIndex].min + ex * x + ey * y + ez * z;
 				child.max = child.min + half_extents;
-				int trisStart = mesh.octree[octreeIndex].trisIndex;
-				int trisCount = mesh.octree[octreeIndex].trisCount;
+				
 				child.trisIndex = mesh.octreeTris.size();
 				child.trisCount = 0;
 				
@@ -596,7 +608,7 @@ void Subdivide(Mesh &mesh, int octreeIndex, int minTris, int depth) {
 		}
 	}
 	for (int i = 0; i < 8; i++) {
-		Subdivide(mesh, mesh.octree[octreeIndex].children[i], minTris, depth - 1);
+		Subdivide(mesh, mesh.octree[octreeIndex].children[i], maxTrisPerVertex, depth - 1);
 	}
 }
 
@@ -617,7 +629,7 @@ void Mesh::GenerateOctree(int firstTriIndex) {
 	}
 	int octreeIndex = octree.size();
 	octree.push_back(newOctree);
-	Subdivide(*this, octreeIndex, 6, 12);
+	Subdivide(*this, octreeIndex, 0, 10);
 	/*
 	ofstream f("octree.json");
 	json(*this, 0, f, 0);
@@ -800,10 +812,13 @@ void TRS(Object *object, cl_double3 translation, double angle, cl_double3 axis, 
 }
 
 void initScene(Object* cpu_objects) {
-	if (!ReadTexture("textures/Earth.jpg")) {
+	if (!ReadTexture("textures/soccer.png")) {
 		exit(EXIT_FAILURE);
 	}
 	if (!ReadTexture("textures/StanfordBunnyTerracotta.jpg")) {
+		exit(EXIT_FAILURE);
+	}
+	if (!ReadTexture("textures/bricks.jpg")) {
 		exit(EXIT_FAILURE);
 	}
 	if (!ReadOBJ("models/pear.obj", theMesh)) {
@@ -837,7 +852,10 @@ void initScene(Object* cpu_objects) {
 	// front wall 
 	cpu_objects[4].color = float3(0.9f, 0.8f, 0.7f);
 	cpu_objects[4].type = CUBE;
-	TRS(&cpu_objects[4], double3(0, 0, 16), 0, double3(0, 1, 0), double3(10, 10, 0.1f));
+	cpu_objects[4].textureIndex = textureValues[6];
+	cpu_objects[4].textureWidth = textureValues[7];
+	cpu_objects[4].textureHeight = textureValues[8];
+	TRS(&cpu_objects[4], double3(0, 0, 16), 0, double3(0, 1, 0), double3(6, 6, 0.1f));
 
 	// Pear
 	cpu_objects[5].color = float3(169/255.0, 168/255.0, 54/255.0);
@@ -852,7 +870,7 @@ void initScene(Object* cpu_objects) {
 	cpu_objects[6].textureIndex = textureValues[3];
 	cpu_objects[6].textureWidth = textureValues[4];
 	cpu_objects[6].textureHeight = textureValues[5];
-	TRS(&cpu_objects[6], double3(2, -1.5, 4), 0, double3(1, 0, 0), double3(10, 10, -10));
+	TRS(&cpu_objects[6], double3(2, -1.5, 6), 0, double3(1, 0, 0), double3(10, 10, -10));
 
 	// Sphere
 	cpu_objects[7].color = float3(0.0f, 1.0f, 0.0f);
@@ -931,7 +949,9 @@ void render(){
 
 	clock_end = std::chrono::high_resolution_clock::now();
 	int ms = std::chrono::duration_cast<std::chrono::milliseconds>(clock_end - clock_start).count();
-	std::cout << 1000.0 * framenumber / ms << " fps \t" << ms / 1000.0 << "s" << std::endl;
+	int frame_ms = std::chrono::duration_cast<std::chrono::milliseconds>(clock_end - clock_prev).count();
+	std::cout << 1000.0 / frame_ms << " fps\taverage: " << 1000.0*framenumber / ms << std::endl;
+	clock_prev = std::chrono::high_resolution_clock::now();
 
 	int new_window_width = glutGet(GLUT_WINDOW_WIDTH),
 	    new_window_height = glutGet(GLUT_WINDOW_HEIGHT);
@@ -952,13 +972,11 @@ void render(){
 		initCLKernel();
 	}
 
-	TRS(&cpu_objects[5], double3(2, -4.9, 13),ms / 1000.0, double3(0, 1, 0), double3(0.5, 0.5, 0.5));
+	TRS(&cpu_objects[5], double3(5 + 2 * sin(ms / 5000.0), -4.9, 13), ms / 1000.0, double3(0, 1, 0), double3(0.5, 0.5, 0.5));
 
-	//TRS(&cpu_objects[6], double3(1, -0.14f, 2 + 5*sin(ms/1500.0)), ms / 500.0, double3(0, 1, 0), double3(0.10, 0.10, -0.10));
+	TRS(&cpu_objects[6], double3(0, -0.5, 1 + 4*sin(ms/2000.0)), -3.1415926 / 2, double3(0, 1, 0), double3(10, 10, -10));
 
-	//TRS(&cpu_objects[7], double3(sin(ms/1000.0), -1 + cos(ms / 1000.0), 12*sin(ms/2000.0)), 0, double3(0, 1, 0), double3(0.5, 0.5, 0.5));
-	//TRS(&cpu_objects[7], double3(-6, 5, 16 + 2*sin(ms/2000.0)), 0, double3(0, 1, 0), double3(0.5, 0.5, 0.5));
-	TRS(&cpu_objects[7], double3(-1, -0.5, 3), ms/1000.0, double3(0, 1, 0), double3(0.5, 0.5, 0.5));
+	TRS(&cpu_objects[7], double3(-1, -0.5, 5 + 2 * sin(ms/2000.0)), ms/1000.0, double3(0, 1, 0), double3(0.5, 0.5, 0.5));
 
 	queue.enqueueWriteBuffer(cl_objects, CL_TRUE, 0, object_count * sizeof(Object), cpu_objects);
 

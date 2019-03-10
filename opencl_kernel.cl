@@ -84,153 +84,7 @@ double3 applyTranspose(const double4 M[4], const double3 v) {
 	return M[0].xyz * v.xxx + M[1].xyz * v.yyy + M[2].xyz * v.zzz;
 }
 
-private int getChildIndex(int side, double3 *uv) {
-	//int childIndex = round(uv->z) + 2 * round(uv->y) + 4 * round(uv->x);
-	switch (side) {
-	case 0:
-		if (uv->x < 0.5) {
-			uv->x *= 2;
-			if (uv->y < 0.5) {
-				uv->y *= 2;
-				return 0;
-			}
-			else {
-				uv->y = 2 * uv->y - 1;
-				return 2;
-			}
-		}
-		else {
-			uv->x = 2 * uv->x - 1;
-			if (uv->y < 0.5) {
-				uv->y *= 2;
-				return 4;
-			}
-			else {
-				uv->y = 2 * uv->y - 1;
-				return 6;
-			}
-		}
-	case 1:
-		if (uv->x < 0.5) {
-			uv->x *= 2;
-			if (uv->y < 0.5) {
-				uv->y *= 2;
-				return 1;
-			}
-			else {
-				uv->y = 2 * uv->y - 1;
-				return 3;
-			}
-		}
-		else {
-			uv->x = 2 * uv->x - 1;
-			if (uv->y < 0.5) {
-				uv->y *= 2;
-				return 5;
-			}
-			else {
-				uv->y = 2 * uv->y - 1;
-				return 7;
-			}
-		}
-	case 2:
-		if (uv->y < 0.5) {
-			uv->y *= 2;
-			if (uv->z < 0.5) {
-				uv->z *= 2;
-				return 0;
-			}
-			else {
-				uv->z = 2 * uv->z - 1;
-				return 1;
-			}
-		}
-		else {
-			uv->y = 2 * uv->y - 1;
-			if (uv->z < 0.5) {
-				uv->z *= 2;
-				return 2;
-			}
-			else {
-				uv->z = 2 * uv->z - 1;
-				return 3;
-			}
-		}
-	case 3:
-		if (uv->y < 0.5) {
-			uv->y *= 2;
-			if (uv->z < 0.5) {
-				uv->z *= 2;
-				return 4;
-			}
-			else {
-				uv->z = 2 * uv->z - 1;
-				return 5;
-			}
-		}
-		else {
-			uv->y = 2 * uv->y - 1;
-			if (uv->z < 0.5) {
-				uv->z *= 2;
-				return 6;
-			}
-			else {
-				uv->z = 2 * uv->z - 1;
-				return 7;
-			}
-		}
-	case 4:
-		if (uv->x < 0.5) {
-			uv->x *= 2;
-			if (uv->z < 0.5) {
-				uv->z *= 2;
-				return 0;
-			}
-			else {
-				uv->z = 2 * uv->z - 1;
-				return 1;
-			}
-		}
-		else {
-			uv->x = 2 * uv->x - 1;
-			if (uv->z < 0.5) {
-				uv->z *= 2;
-				return 4;
-			}
-			else {
-				uv->z = 2 * uv->z - 1;
-				return 5;
-			}
-		}
-	case 5:
-		if (uv->x < 0.5) {
-			uv->x *= 2;
-			if (uv->z < 0.5) {
-				uv->z *= 2;
-				return 2;
-			}
-			else {
-				uv->z = 2 * uv->z - 1;
-				return 3;
-			}
-		}
-		else {
-			uv->x = 2 * uv->x - 1;
-			if (uv->z < 0.5) {
-				uv->z *= 2;
-				return 6;
-			}
-			else {
-				uv->z = 2 * uv->z - 1;
-				return 7;
-			}
-		}
-	default:
-		return -1;
-	}
-}
-
-bool intersect_triangle(const double3 A, const double3 B, const double3 C, const Ray *ray, Hit *hit) {
+bool intersect_triangle(const double3 A, const double3 B, const double3 C, const Ray *ray, double *dist, double2 *uv) {
 	/*
 	https://www.scratchapixel.com/lessons/3d-basic-rendering/ray-tracing-rendering-a-triangle/moller-trumbore-ray-triangle-intersection
     */
@@ -238,21 +92,19 @@ bool intersect_triangle(const double3 A, const double3 B, const double3 C, const
 	double3 v0v2 = C - A;
 	double3 pvec = cross(ray->dir, v0v2);
 	double det = dot(v0v1, pvec);
-	if (det < EPSILON) return false;
+	if (det < EPSILON && -EPSILON < det) return false;
 
 	double invDet = 1 / det;
 
 	double3 tvec = ray->origin - A;
-	double u = dot(tvec, pvec) * invDet;
-	if (u < 0 || u > 1) return false;
+	uv->s0 = dot(tvec, pvec) * invDet;
+	if (uv->s0 < 0 || uv->s0 > 1) return false;
 
 	double3 qvec = cross(tvec, v0v1);
-	double v = dot(ray->dir, qvec) * invDet;
-	if (v < 0 || u + v > 1) return false;
+	uv->s1 = dot(ray->dir, qvec) * invDet;
+	if (uv->s1 < 0 || uv->s0 + uv->s1 > 1) return false;
 
-	double t = dot(v0v2, qvec) * invDet;
-	hit->dist = t;
-	hit->uv = (double2)(u, v);
+	*dist = dot(v0v2, qvec) * invDet;
 	return true;
 }
 
@@ -351,59 +203,87 @@ bool intersect_octree(
 		octrees[currOctreeIndex].max
 	};
 	bool didHit = false;
+	int hitTri;
 	if (!intersect_AABB(bounds, &newRay, &d, &closeSide, &farSide)) {
 		return false;
 	}
 	double3 uv = newRay.origin + newRay.dir * d.s0;
+
+	if (d.s0 < 0) {
+		Octree curr = octrees[currOctreeIndex];
+		uv = (newRay.origin - curr.min) / (curr.max - curr.min);
+		while (curr.children[0] != -1) {
+			int childIndex = round(uv.z) + 2 * round(uv.y) + 4 * round(uv.x);
+			uv = 2.0 * fmod(min(uv, 1.0 - EPSILON), 0.5);
+			currOctreeIndex = curr.children[childIndex];
+			curr = octrees[currOctreeIndex];
+		}
+		bounds[0] = curr.min;
+		bounds[1] = curr.max;
+		if (!intersect_AABB(bounds, &newRay, &d, &closeSide, &farSide)) {
+			return false;
+		}
+		uv = newRay.origin + newRay.dir * d.s0;
+	}
+
 	double3 scaledDir = normalize(newRay.dir / (octrees[currOctreeIndex].max - octrees[currOctreeIndex].min));
 	while(currOctreeIndex != -1) {
-		double3 extents = octrees[currOctreeIndex].max - octrees[currOctreeIndex].min;
-		uv = (uv - octrees[currOctreeIndex].min) / extents;
-		while (octrees[currOctreeIndex].children[0] != -1) {
-			int childIndex = getChildIndex(closeSide, &uv);
-			currOctreeIndex = octrees[currOctreeIndex].children[childIndex];
+		Octree curr = octrees[currOctreeIndex];
+		double3 extents = curr.max - curr.min;
+		uv = (uv - curr.min) / extents;
+		while (curr.children[0] != -1) {
+			int childIndex = round(uv.z) + 2 * round(uv.y) + 4 * round(uv.x);
+			uv = 2.0 * fmod(min(uv, 1.0 - EPSILON), 0.5);
+			currOctreeIndex = curr.children[childIndex];
+			curr = octrees[currOctreeIndex];
 		}
 		for (
-			int i = octrees[currOctreeIndex].trisIndex;
-			i < octrees[currOctreeIndex].trisIndex + octrees[currOctreeIndex].trisCount;
+			int i = curr.trisIndex;
+			i < curr.trisIndex + curr.trisCount;
 			i++
-		) {
+			) {
 			int tri = octreeTris[i];
 			double3 A = vertices[triangles[9 * tri + 3 * 0]];
 			double3 B = vertices[triangles[9 * tri + 3 * 1]];
 			double3 C = vertices[triangles[9 * tri + 3 * 2]];
-			Hit newHit;
-			if (intersect_triangle(A, B, C, &newRay, &newHit)) {
-				if (newHit.dist > 0.0f && newHit.dist < hit->dist) {
-					double3 normA = normals[triangles[2 + 9 * tri + 3 * 0]];
-					double3 normB = normals[triangles[2 + 9 * tri + 3 * 1]];
-					double3 normC = normals[triangles[2 + 9 * tri + 3 * 2]];
-					double u = newHit.uv.s0;
-					double v = newHit.uv.s1;
-					newHit.normal = (1.0 - u - v)*normA + u * normB + v * normC;
-					double2 uvA = uvs[triangles[1 + 9 * tri + 3 * 0]];
-					double2 uvB = uvs[triangles[1 + 9 * tri + 3 * 1]];
-					double2 uvC = uvs[triangles[1 + 9 * tri + 3 * 2]];
-					newHit.uv = (1.0 - u - v)*uvA + u * uvB + v * uvC;
-					*hit = newHit;
+			double dist;
+			double2 triUV;
+			if (intersect_triangle(A, B, C, &newRay, &dist, &triUV)) {
+				if (0 <= dist && dist < hit->dist) {
+					hitTri = tri;
+					hit->dist = dist;
+					hit->uv = triUV;
 					didHit = true;
 				}
 			}
 		}
-		extents = octrees[currOctreeIndex].max - octrees[currOctreeIndex].min;
+		extents = curr.max - curr.min;
 		farSide = getOppositeBoxSide(scaledDir, closeSide, &uv);
 		closeSide = farSide - 2 * (farSide % 2) + 1;
-		uv = octrees[currOctreeIndex].min + uv * extents;
-		currOctreeIndex = octrees[currOctreeIndex].neighbors[farSide];
+		uv = curr.min + uv * extents;
+		currOctreeIndex = curr.neighbors[farSide];
 		if (length(uv - newRay.origin) > hit->dist) {
 			break;
 		}
 	}
 	if (didHit) {
+		double u = hit->uv.s0;
+		double v = hit->uv.s1;
+
+		double3 normA = normals[triangles[2 + 9 * hitTri + 3 * 0]];
+		double3 normB = normals[triangles[2 + 9 * hitTri + 3 * 1]];
+		double3 normC = normals[triangles[2 + 9 * hitTri + 3 * 2]];
+		hit->normal = normalize(applyTranspose(objects[index].InvM, (1.0 - u - v)*normA + u * normB + v * normC));
+
+		double2 uvA = uvs[triangles[1 + 9 * hitTri + 3 * 0]];
+		double2 uvB = uvs[triangles[1 + 9 * hitTri + 3 * 1]];
+		double2 uvC = uvs[triangles[1 + 9 * hitTri + 3 * 2]];
+		hit->uv = (1.0 - u - v)*uvA + u * uvB + v * uvC;
+
 		double3 objPoint = newRay.origin + hit->dist * newRay.dir;
 		double3 worldPoint = transformPoint(objects[index].M, objPoint);
 		hit->dist = length(worldPoint - ray->origin);
-		hit->normal = normalize(applyTranspose(objects[index].InvM, hit->normal));
+		
 		return true;
 	}
 	return false;
@@ -445,7 +325,7 @@ bool intersect_cube(global const Object *objects, int index, const Ray *ray, Hit
 			uv.s1 = (pt.y + 1) / 2.0;
 		}
 		double3 worldPt = transformPoint(objects[index].M, pt);
-		hit->dist = length(worldPt);
+		hit->dist = length(worldPt - ray->origin);
 		hit->normal = normalize(applyTranspose(objects[index].InvM, normal));
 		hit->uv = uv;
 		return true;
@@ -471,10 +351,58 @@ bool intersect_sphere(global const Object *objects, const int index, const Ray *
 	}
 	double3 objPt = -rayToSphere + dir * dist;
 	double3 worldPt = transformPoint(objects[index].M, objPt);
-	hit->dist = length(worldPt);
+	hit->dist = length(worldPt - ray->origin);
 	hit->normal = normalize(applyTranspose(objects[index].InvM, objPt));
 	hit->uv.s0 = 0.5 + atan2(objPt.z, objPt.x) / (2 * M_PI);
 	hit->uv.s1 = asin(objPt.y) / M_PI + 0.5;
+	return true;
+}
+
+bool sample_light(
+	global const Object* objects,
+	const int object_count,
+	global const double3 *vertices,
+	global const double3 *normals,
+	global const double2 *uvs,
+	global const unsigned int *triangles,
+	global const Octree *octrees,
+	global const int *octreeTris,
+	global const unsigned char *textures,
+	const Ray *ray,
+	int lightIndex,
+	double lightDist
+) {
+	/* check if the ray intersects each object in the scene */
+	for (int i = 0; i < object_count; i++) {
+		if (i != lightIndex) {
+			Hit newHit;
+			newHit.dist = 1e20;
+			switch (objects[i].type) {
+			case SPHERE:
+				if (intersect_sphere(objects, i, ray, &newHit)) {
+					if (newHit.dist < lightDist) {
+						return false;
+					}
+				}
+				break;
+			case CUBE:
+				if (intersect_cube(objects, i, ray, &newHit)) {
+					if (newHit.dist < lightDist) {
+						return false;
+					}
+				}
+				break;
+			case MESH:
+				if (intersect_octree(objects, i, vertices, normals, uvs, triangles, octrees, octreeTris, ray, &newHit)) {
+					if (newHit.dist < lightDist) {
+						return false;
+					}
+				}
+				break;
+			}
+		}
+	}
+	
 	return true;
 }
 
@@ -533,6 +461,9 @@ bool intersect_scene(
 		}
 	}
 	if (didHit) {
+		if (dot(hit->normal, ray->dir) > 0) {
+			hit->normal *= -1;
+		}
 		if (objects[hit->object].textureIndex != -1) {
 			int width = objects[hit->object].textureWidth;
 			int x = width * hit->uv.s0;
@@ -577,7 +508,7 @@ float3 trace(
 	double3 hitpoint = camray->origin + camray->dir * hit.dist;
 	double3 normal = hit.normal;
 
-	float3 color = hit.color * 0.5f;
+	float3 color = hit.color * 0.2f;
 
 	/*
 	if (objects[hit.object].type == MESH) {
@@ -595,18 +526,17 @@ float3 trace(
 	}
 	*/
 	
-	double3 light_pos = (double3)(-2, 2, 4);
-	double3 light_dir = hitpoint - light_pos;
+	double3 light_pos = transformPoint(objects[7].M, (double3)(0,0,0)) + (double3)(0, 1, 0);
+	double3 light_dir = light_pos - hitpoint;
 	
 	Ray lightRay;
 	lightRay.dir = normalize(light_dir);
-	lightRay.origin = light_pos;
+	lightRay.origin = hitpoint + hit.normal * 0.001;
 
 	Hit newHit;
-	if (dot(normal, -light_dir) > 0) {
-		bool didHit = intersect_scene(objects, object_count, vertices, normals, uvs, triangles, octrees, octreeTris, textures, &lightRay, &newHit);
-		if (didHit && newHit.object == hit.object) {
-			color += (float)(0.8*dot(normal, -lightRay.dir)) * hit.color;
+	if (dot(normal, light_dir) > 0) {
+		if (sample_light(objects, object_count, vertices, normals, uvs, triangles, octrees, octreeTris, textures, &lightRay, 7, length(light_dir))) {
+			color += (float)(0.8*dot(normal, lightRay.dir)) * hit.color;
 		}
 	}
 	return color;
