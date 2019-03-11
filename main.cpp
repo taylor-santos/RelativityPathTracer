@@ -10,6 +10,7 @@
 #include <CL\cl.hpp>
 #include <chrono>
 #include <map>
+#include <math.h>
 
 #include "gl_interop.h"
 #define cimg_use_jpeg
@@ -19,7 +20,7 @@
 // cleanup()
 // check for cl-gl interop
 
-const int object_count = 8;
+const int object_count = 9;
 
 std::chrono::time_point<std::chrono::high_resolution_clock> clock_start, clock_end, clock_prev;
 
@@ -851,7 +852,7 @@ void initScene(Object* cpu_objects) {
 	TRS(&cpu_objects[2], double3(0, -6, 10), 0, double3(0, 1, 0), double3(10, 0.1f, 10));
 
 	// ceiling
-	cpu_objects[3].color = white_point;
+	cpu_objects[3].color = float3(0.9, 0.8, 0.7);
 	cpu_objects[3].type = CUBE;
 	cpu_objects[3].light = true;
 	TRS(&cpu_objects[3], double3(0, 6, 10), 0, double3(0, 1, 0), double3(10, 0.1f, 10));
@@ -883,6 +884,12 @@ void initScene(Object* cpu_objects) {
 	cpu_objects[7].textureIndex = textureValues[0];
 	cpu_objects[7].textureWidth = textureValues[1];
 	cpu_objects[7].textureHeight = textureValues[2];
+
+	// Light
+	cpu_objects[8].color = white_point;
+	cpu_objects[8].type = SPHERE;
+	cpu_objects[8].light = true;
+	TRS(&cpu_objects[8], double3(0, 5, 10), 0, double3(0, 1, 0), double3(0.1, 0.1, 0.1));
 }
 
 void initCLKernel(){
@@ -977,9 +984,11 @@ void render(){
 		initCLKernel();
 	}
 
-	TRS(&cpu_objects[5], double3(1 + 2 * sin(ms / 5000.0), -4.9, 13), ms / 1000.0, double3(0, 1, 0), double3(0.5, 0.5, 0.5));
+	double x = ms / 400.0;
 
-	TRS(&cpu_objects[6], double3(4 * sin(ms / 2000.0), -0.5, 9), -3.1415926 / 2, double3(0, 1, 0), double3(10, 10, -10));
+	TRS(&cpu_objects[5], double3(1, 2*sin(x + 3.14159 / 2) - 3.5, 13), 0, double3(0, 1, 0), double3(0.5, 0.5 * (0.8 * sin(1.0 - pow(sin(x/2), 10))/sin(1) + 0.2), 0.5));
+
+	TRS(&cpu_objects[6], double3(4 * sin(ms / 2000.0), -0.5, 9), -3.1415926 / 2 * ms / 3000.0, double3(0, 1, 0), double3(10, 10, -10));
 
 	TRS(&cpu_objects[7], double3(-1, -1.5, 9 + 2 * sin(ms/1500.0)), ms/500.0, double3(0, 1, 0), double3(1, 1, 1));
 

@@ -58,7 +58,7 @@ Ray createCamRay(const double x_coord, const double y_coord, const int width, co
 
 	/* create camera ray*/
 	Ray ray;
-	ray.origin = (double3)(0, 0, 0); /* fixed camera position */
+	ray.origin = (double3)(0, 0, -4); /* fixed camera position */
 	ray.dir = normalize(pixel_pos); /* vector from camera to pixel on screen */
 	return ray;
 }
