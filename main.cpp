@@ -40,6 +40,8 @@ cl::Buffer cl_octreeTris;
 cl::Buffer cl_textures;
 cl::BufferGL cl_vbo;
 std::vector<cl::Memory> cl_vbos;
+cl_double3 white_point;
+double ambient;
 
 // image buffer (not needed with real-time viewport)
 cl_float4* cpu_output;
@@ -58,13 +60,14 @@ struct Object
 {
 	cl_double4 M[4];
 	cl_double4 InvM[4];
-	cl_float3 color;
+	cl_double3 color;
 	enum objectType type;
 	int meshIndex;
 	int textureIndex = -1;
 	int textureWidth;
 	int textureHeight;
-	char dummy[24];
+	bool light = false;
+	char dummy[4];
 };
 
 Object cpu_objects[object_count];
@@ -829,6 +832,9 @@ void initScene(Object* cpu_objects) {
 	}
 	queue.enqueueWriteBuffer(cl_objects, CL_TRUE, 0, object_count * sizeof(Object), cpu_objects);
 
+	white_point = double3(10, 10, 10);
+	ambient = 0.5;
+
 	// left wall
 	cpu_objects[0].color = float3(0.75f, 0.25f, 0.25f);
 	cpu_objects[0].type = CUBE;
@@ -840,13 +846,14 @@ void initScene(Object* cpu_objects) {
 	TRS(&cpu_objects[1], double3(6, 0, 10), 0, double3(0, 1, 0), double3(0.1f, 10, 10));
 
 	// floor
-	cpu_objects[2].color = float3(0.9f, 0.8f, 0.7f);
+	cpu_objects[2].color = float3(0.25f, 0.75f, 0.25f);
 	cpu_objects[2].type = CUBE;
 	TRS(&cpu_objects[2], double3(0, -6, 10), 0, double3(0, 1, 0), double3(10, 0.1f, 10));
 
 	// ceiling
-	cpu_objects[3].color = float3(0.9f, 0.8f, 0.7f);
+	cpu_objects[3].color = white_point;
 	cpu_objects[3].type = CUBE;
+	cpu_objects[3].light = true;
 	TRS(&cpu_objects[3], double3(0, 6, 10), 0, double3(0, 1, 0), double3(10, 0.1f, 10));
 
 	// front wall 
@@ -861,7 +868,6 @@ void initScene(Object* cpu_objects) {
 	cpu_objects[5].color = float3(169/255.0, 168/255.0, 54/255.0);
 	cpu_objects[5].type = MESH;
 	cpu_objects[5].meshIndex = theMesh.meshIndices[0];
-	TRS(&cpu_objects[5], double3(-3, -4.75f, 12), 0, double3(0, 1, 0), double3(0.01, 0.01, 0.01));
 
 	// Bunny
 	cpu_objects[6].color = float3(1.0f, 0.2f, 0.9f);
@@ -870,15 +876,13 @@ void initScene(Object* cpu_objects) {
 	cpu_objects[6].textureIndex = textureValues[3];
 	cpu_objects[6].textureWidth = textureValues[4];
 	cpu_objects[6].textureHeight = textureValues[5];
-	TRS(&cpu_objects[6], double3(2, -1.5, 6), 0, double3(1, 0, 0), double3(10, 10, -10));
 
 	// Sphere
-	cpu_objects[7].color = float3(0.0f, 1.0f, 0.0f);
+	cpu_objects[7].color = float3(1, 1, 1);
 	cpu_objects[7].type = SPHERE;
 	cpu_objects[7].textureIndex = textureValues[0];
 	cpu_objects[7].textureWidth = textureValues[1];
 	cpu_objects[7].textureHeight = textureValues[2];
-	TRS(&cpu_objects[7], double3(0, 0, 10), 0, double3(0, 1, 0), double3(0.5, 0.5, 0.5));
 }
 
 void initCLKernel(){
@@ -899,9 +903,11 @@ void initCLKernel(){
 	kernel.setArg(6, cl_octrees);
 	kernel.setArg(7, cl_octreeTris);
 	kernel.setArg(8, cl_textures);
-	kernel.setArg(9, window_width);
-	kernel.setArg(10, window_height);
-	kernel.setArg(11, cl_vbo);
+	kernel.setArg(9, white_point);
+	kernel.setArg(10, ambient);
+	kernel.setArg(11, window_width);
+	kernel.setArg(12, window_height);
+	kernel.setArg(13, cl_vbo);
 }
 
 void runKernel(){
@@ -942,7 +948,6 @@ unsigned int WangHash(unsigned int a) {
 	return a;
 }
 
-
 void render(){
 	
 	framenumber++;
@@ -972,11 +977,11 @@ void render(){
 		initCLKernel();
 	}
 
-	TRS(&cpu_objects[5], double3(5 + 2 * sin(ms / 5000.0), -4.9, 13), ms / 1000.0, double3(0, 1, 0), double3(0.5, 0.5, 0.5));
+	TRS(&cpu_objects[5], double3(1 + 2 * sin(ms / 5000.0), -4.9, 13), ms / 1000.0, double3(0, 1, 0), double3(0.5, 0.5, 0.5));
 
-	TRS(&cpu_objects[6], double3(0, -0.5, 1 + 4*sin(ms/2000.0)), -3.1415926 / 2, double3(0, 1, 0), double3(10, 10, -10));
+	TRS(&cpu_objects[6], double3(4 * sin(ms / 2000.0), -0.5, 9), -3.1415926 / 2, double3(0, 1, 0), double3(10, 10, -10));
 
-	TRS(&cpu_objects[7], double3(-1, -0.5, 5 + 2 * sin(ms/2000.0)), ms/1000.0, double3(0, 1, 0), double3(0.5, 0.5, 0.5));
+	TRS(&cpu_objects[7], double3(-1, -1.5, 9 + 2 * sin(ms/1500.0)), ms/500.0, double3(0, 1, 0), double3(1, 1, 1));
 
 	queue.enqueueWriteBuffer(cl_objects, CL_TRUE, 0, object_count * sizeof(Object), cpu_objects);
 
@@ -993,6 +998,7 @@ void cleanUp(){
 }
 
 void main(int argc, char** argv){
+	std::cout << sizeof(Object) << std::endl;
 	// initialise OpenGL (GLEW and GLUT window + callback functions)
 	initGL(argc, argv);
 	std::cout << "OpenGL initialized \n";

@@ -17,19 +17,20 @@ enum objectType { SPHERE, CUBE, MESH };
 typedef struct Object {
 	double4 M[4];
 	double4 InvM[4];
-	float3 color;
+	double3 color;
 	enum objectType type;
 	int meshIndex;
 	int textureIndex;
 	int textureWidth;
 	int textureHeight;
+	bool light;
 } Object;
 
 typedef struct Hit {
 	double dist;
 	double3 normal;
 	double2 uv;
-	float3 color;
+	double3 color;
 	int object;
 } Hit;
 
@@ -469,7 +470,7 @@ bool intersect_scene(
 			int x = width * hit->uv.s0;
 			int y = objects[hit->object].textureHeight * (1.0 - hit->uv.s1);
 			int offset = objects[hit->object].textureIndex;
-			hit->color = (float3)(
+			hit->color = (double3)(
 				textures[offset + 3 * (width * y + x) + 0] / 255.0,
 				textures[offset + 3 * (width * y + x) + 1] / 255.0,
 				textures[offset + 3 * (width * y + x) + 2] / 255.0
@@ -489,7 +490,7 @@ bool intersect_scene(
 /* each ray hitting a surface will be reflected in a random direction (by randomly sampling the hemisphere above the hitpoint) */
 /* small optimisation: diffuse ray directions are calculated using cosine weighted importance sampling */
 
-float3 trace(
+double3 trace(
 	global const Object* objects,
 	const int object_count,
 	global const double3 *vertices,
@@ -499,47 +500,51 @@ float3 trace(
 	global const Octree *octrees,
 	global const int *octreeTris,
 	global const unsigned char *textures,
+	const double ambient,
 	const Ray* camray
 ) {
 	Hit hit;
 	if (!intersect_scene(objects, object_count, vertices, normals, uvs, triangles, octrees, octreeTris, textures, camray, &hit))
-		return (float3)(0.15f, 0.15f, 0.25f);
+		return (double3)(0.15, 0.15, 0.25);
 
 	double3 hitpoint = camray->origin + camray->dir * hit.dist;
 	double3 normal = hit.normal;
 
-	float3 color = hit.color * 0.2f;
-
-	/*
-	if (objects[hit.object].type == MESH) {
-		Ray reflectRay;
-		reflectRay.dir = camray->dir - 2 * normal * dot(normal, camray->dir);
-		reflectRay.origin = hitpoint + reflectRay.dir * 0.001;
-
-		if (!intersect_scene(objects, object_count, vertices, normals, uvs, triangles, octrees, octreeTris, textures, &reflectRay, &hit))
-			return (float3)(0.15f, 0.15f, 0.25f);
-
-		hitpoint = reflectRay.origin + reflectRay.dir * hit.dist;
-		normal = hit.normal;
-
-		color += hit.color * 0.2f;
+	double3 color = hit.color * ambient;
+	if (objects[hit.object].light) {
+		color += hit.color;
 	}
-	*/
-	
-	double3 light_pos = transformPoint(objects[7].M, (double3)(0,0,0)) + (double3)(0, 1, 0);
-	double3 light_dir = light_pos - hitpoint;
-	
-	Ray lightRay;
-	lightRay.dir = normalize(light_dir);
-	lightRay.origin = hitpoint + hit.normal * 0.001;
 
-	Hit newHit;
-	if (dot(normal, light_dir) > 0) {
-		if (sample_light(objects, object_count, vertices, normals, uvs, triangles, octrees, octreeTris, textures, &lightRay, 7, length(light_dir))) {
-			color += (float)(0.8*dot(normal, lightRay.dir)) * hit.color;
+	for (int i = 0; i < object_count; i++) {
+		if (i != hit.object && objects[i].light) {
+			double3 light_pos = transformPoint(objects[i].M, (double3)(0, 0, 0));
+			double3 light_dir = light_pos - hitpoint;
+
+			Ray lightRay;
+			lightRay.dir = normalize(light_dir);
+			lightRay.origin = hitpoint + hit.normal * 0.001;
+
+			Hit newHit;
+			if (dot(normal, light_dir) > 0) {
+				if (sample_light(objects, object_count, vertices, normals, uvs, triangles, octrees, octreeTris, textures, &lightRay, i, length(light_dir))) {
+					color += (dot(normal, lightRay.dir)/(1.0 + 0.1 * length(light_dir) + 0.01 * dot(light_dir, light_dir))) * hit.color * objects[i].color;
+				}
+			}
 		}
 	}
 	return color;
+}
+
+
+double3 hable(const double3 x) {
+	double A = 0.15;
+	double B = 0.50;
+	double C = 0.10;
+	double D = 0.20;
+	double E = 0.02;
+	double F = 0.30;
+
+	return ((x*(A*x + C * B) + D * E) / (x*(A*x + B) + D * F)) - E / F;
 }
 
 union Colour { float c; uchar4 components; };
@@ -554,6 +559,8 @@ __kernel void render_kernel(
 	global const Octree *octrees,
 	global const int *octreeTris,
 	global const unsigned char *textures,
+	const double3 white_point,
+	const double ambient,
 	const int width,
 	const int height,
 	__global float3* output
@@ -562,23 +569,24 @@ __kernel void render_kernel(
 	unsigned int x_coord = work_item_id % width;			/* x-coordinate of the pixel */
 	unsigned int y_coord = work_item_id / width;			/* y-coordinate of the pixel */
 	
-	float3 finalcolor = (float3)(0, 0, 0);
+	double3 finalcolor = (double3)(0, 0, 0);
 
 	for (int y = 0; y < MSAASAMPLES; y++) {
 		for (int x = 0; x < MSAASAMPLES; x++) {
 			Ray camray = createCamRay((double)x_coord + (double)x/MSAASAMPLES, (double)y_coord + (double)y/ MSAASAMPLES, width, height);
 
-			finalcolor += trace(objects, object_count, vertices, normals, uvs, triangles, octrees, octreeTris, textures, &camray);
+			finalcolor += trace(objects, object_count, vertices, normals, uvs, triangles, octrees, octreeTris, textures, ambient, &camray);
 		}
 	}
 	finalcolor = finalcolor / (MSAASAMPLES*MSAASAMPLES);
-
+	finalcolor = hable(finalcolor) / hable(white_point * (1.0 + ambient));
+	finalcolor = min(finalcolor, 1.0);
 
 	union Colour fcolour;
 	fcolour.components = (uchar4)(	
-		(unsigned char)(min(finalcolor.x, 1.0f) * 255), 
-		(unsigned char)(min(finalcolor.y, 1.0f) * 255),
-		(unsigned char)(min(finalcolor.z, 1.0f) * 255),
+		(unsigned char)(finalcolor.x * 255), 
+		(unsigned char)(finalcolor.y * 255),
+		(unsigned char)(finalcolor.z * 255),
 		1);
 	/* store the pixelcolour in the output buffer */
 	output[work_item_id] = (float3)(x_coord, y_coord, fcolour.c);
