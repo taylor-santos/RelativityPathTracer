@@ -17,6 +17,8 @@ enum objectType { SPHERE, CUBE, MESH };
 typedef struct Object {
 	double4 M[4];
 	double4 InvM[4];
+	double4 Lorentz[4];
+	double4 InvLorentz[4];
 	double3 color;
 	enum objectType type;
 	int meshIndex;
@@ -69,6 +71,15 @@ double3 transformPoint(const double4 M[4], const double3 v) {
 		dot(M[0], V),
 		dot(M[1], V),
 		dot(M[2], V)
+	);
+}
+
+double4 transformPoint4D(const double4 M[4], const double4 v) {
+	return (double4)(
+		dot(M[0], v),
+		dot(M[1], v),
+		dot(M[2], v),
+		dot(M[3], v)
 	);
 }
 
@@ -418,6 +429,7 @@ bool intersect_scene(
 	global const int *octreeTris,
 	global const unsigned char *textures,
 	const Ray *ray,
+	const double time,
 	Hit *hit
 ) {
 	/* initialise t to a very large number,
@@ -431,9 +443,18 @@ bool intersect_scene(
 	for (int i = 0; i < object_count; i++) {
 		Hit newHit;
 		newHit.dist = inf;
+		Ray newRay;
+		double4 newDir, newEvent;
 		switch (objects[i].type) {
 		case SPHERE:
-			if (intersect_sphere(objects, i, ray, &newHit)) {
+			newEvent = (double4)(time, ray->origin);
+			newRay.origin = transformPoint4D(objects[i].Lorentz, newEvent).yzw;
+			newDir = transformPoint4D(objects[i].Lorentz, (double4)(1, ray->dir));
+			newRay.dir = normalize(newDir.yzw);
+			if (intersect_sphere(objects, i, &newRay, &newHit)) {
+				newEvent += (double4)(0, newRay.dir) * newHit.dist;
+				newEvent = transformPoint4D(objects[i].InvLorentz, newEvent);
+				newHit.dist = length(newEvent.yzw - ray->origin);
 				if (newHit.dist < hit->dist) {
 					*hit = newHit;
 					hit->object = i;
@@ -501,10 +522,11 @@ double3 trace(
 	global const int *octreeTris,
 	global const unsigned char *textures,
 	const double ambient,
+	const double time,
 	const Ray* camray
 ) {
 	Hit hit;
-	if (!intersect_scene(objects, object_count, vertices, normals, uvs, triangles, octrees, octreeTris, textures, camray, &hit))
+	if (!intersect_scene(objects, object_count, vertices, normals, uvs, triangles, octrees, octreeTris, textures, camray, time, &hit))
 		return (double3)(0.15, 0.15, 0.25);
 
 	double3 hitpoint = camray->origin + camray->dir * hit.dist;
@@ -561,6 +583,7 @@ __kernel void render_kernel(
 	global const unsigned char *textures,
 	const double3 white_point,
 	const double ambient,
+	const double time,
 	const int width,
 	const int height,
 	__global float3* output
@@ -575,7 +598,7 @@ __kernel void render_kernel(
 		for (int x = 0; x < MSAASAMPLES; x++) {
 			Ray camray = createCamRay((double)x_coord + (double)x/MSAASAMPLES, (double)y_coord + (double)y/ MSAASAMPLES, width, height);
 
-			finalcolor += trace(objects, object_count, vertices, normals, uvs, triangles, octrees, octreeTris, textures, ambient, &camray);
+			finalcolor += trace(objects, object_count, vertices, normals, uvs, triangles, octrees, octreeTris, textures, ambient, time, &camray);
 		}
 	}
 	finalcolor = finalcolor / (MSAASAMPLES*MSAASAMPLES);

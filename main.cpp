@@ -20,9 +20,10 @@
 // cleanup()
 // check for cl-gl interop
 
-const int object_count = 9;
+const int object_count = 7;
 
 std::chrono::time_point<std::chrono::high_resolution_clock> clock_start, clock_end, clock_prev;
+double currTime = 0;
 
 // OpenCL objects
 cl::Device device;
@@ -61,6 +62,8 @@ struct Object
 {
 	cl_double4 M[4];
 	cl_double4 InvM[4];
+	cl_double4 Lorentz[4];
+	cl_double4 InvLorentz[4];
 	cl_double3 color;
 	enum objectType type;
 	int meshIndex;
@@ -815,6 +818,23 @@ void TRS(Object *object, cl_double3 translation, double angle, cl_double3 axis, 
 	calcInvM(object);
 }
 
+void setLorentzBoost(Object *object, cl_double3 v) {
+	double gamma = 1.0 / sqrt(1.0 - dot(v, v));
+	double vSqr = dot(v, v);
+	object->Lorentz[0]    = double4(gamma,        -v.x * gamma,                           -v.y * gamma,                           -v.z * gamma);
+	object->Lorentz[1]    = double4(-v.x * gamma, (gamma - 1.0) * v.x * v.x / vSqr + 1.0, (gamma - 1.0) * v.x * v.y / vSqr,       (gamma - 1.0) * v.x * v.z / vSqr);
+	object->Lorentz[2]    = double4(-v.y * gamma, (gamma - 1.0) * v.y * v.x / vSqr,       (gamma - 1.0) * v.y * v.y / vSqr + 1.0, (gamma - 1.0) * v.y * v.z / vSqr);
+	object->Lorentz[3]    = double4(-v.z * gamma, (gamma - 1.0) * v.z * v.x / vSqr,       (gamma - 1.0) * v.z * v.y / vSqr,       (gamma - 1.0) * v.z * v.z / vSqr + 1.0); 
+	
+	object->InvLorentz[0] = double4(gamma,        v.x * gamma,                            v.y * gamma,                            v.z * gamma);
+	object->InvLorentz[1] = object->Lorentz[1];
+	object->InvLorentz[1].x *= -1;
+	object->InvLorentz[2] = object->Lorentz[2];
+	object->InvLorentz[2].x *= -1;
+	object->InvLorentz[3] = object->Lorentz[3];
+	object->InvLorentz[3].x *= -1;
+};
+
 void initScene(Object* cpu_objects) {
 	if (!ReadTexture("textures/soccer.png")) {
 		exit(EXIT_FAILURE);
@@ -825,12 +845,14 @@ void initScene(Object* cpu_objects) {
 	if (!ReadTexture("textures/bricks.jpg")) {
 		exit(EXIT_FAILURE);
 	}
+	/*
 	if (!ReadOBJ("models/pear.obj", theMesh)) {
 		exit(EXIT_FAILURE);
 	}
 	if (!ReadOBJ("models/StanfordBunny.obj", theMesh)) {
 		exit(EXIT_FAILURE);
 	}
+	*/
 	queue.enqueueWriteBuffer(cl_objects, CL_TRUE, 0, object_count * sizeof(Object), cpu_objects);
 
 	white_point = double3(10, 10, 10);
@@ -854,7 +876,6 @@ void initScene(Object* cpu_objects) {
 	// ceiling
 	cpu_objects[3].color = float3(0.9, 0.8, 0.7);
 	cpu_objects[3].type = CUBE;
-	cpu_objects[3].light = true;
 	TRS(&cpu_objects[3], double3(0, 6, 10), 0, double3(0, 1, 0), double3(10, 0.1f, 10));
 
 	// front wall 
@@ -865,6 +886,22 @@ void initScene(Object* cpu_objects) {
 	cpu_objects[4].textureHeight = textureValues[8];
 	TRS(&cpu_objects[4], double3(0, 0, 16), 0, double3(0, 1, 0), double3(6, 6, 0.1f));
 
+	// Sphere
+	cpu_objects[5].color = float3(1, 1, 1);
+	cpu_objects[5].type = SPHERE;
+	cpu_objects[5].textureIndex = textureValues[0];
+	cpu_objects[5].textureWidth = textureValues[1];
+	cpu_objects[5].textureHeight = textureValues[2];
+	TRS(&cpu_objects[5], double3(-1, -1.5, 11), 0, double3(0, 1, 0), double3(1, 1, 1));
+	setLorentzBoost(&cpu_objects[5], double3(0.2, 0, 0));
+
+	// Light
+	cpu_objects[6].color = white_point;
+	cpu_objects[6].type = SPHERE;
+	cpu_objects[6].light = true;
+	TRS(&cpu_objects[6], double3(0, 5, 10), 0, double3(0, 1, 0), double3(0.1, 0.1, 0.1));
+	setLorentzBoost(&cpu_objects[6], double3(0, 0, 0));
+	/*
 	// Pear
 	cpu_objects[5].color = float3(169/255.0, 168/255.0, 54/255.0);
 	cpu_objects[5].type = MESH;
@@ -877,19 +914,8 @@ void initScene(Object* cpu_objects) {
 	cpu_objects[6].textureIndex = textureValues[3];
 	cpu_objects[6].textureWidth = textureValues[4];
 	cpu_objects[6].textureHeight = textureValues[5];
-
-	// Sphere
-	cpu_objects[7].color = float3(1, 1, 1);
-	cpu_objects[7].type = SPHERE;
-	cpu_objects[7].textureIndex = textureValues[0];
-	cpu_objects[7].textureWidth = textureValues[1];
-	cpu_objects[7].textureHeight = textureValues[2];
-
-	// Light
-	cpu_objects[8].color = white_point;
-	cpu_objects[8].type = SPHERE;
-	cpu_objects[8].light = true;
-	TRS(&cpu_objects[8], double3(0, 5, 10), 0, double3(0, 1, 0), double3(0.1, 0.1, 0.1));
+	*/
+	
 }
 
 void initCLKernel(){
@@ -912,9 +938,10 @@ void initCLKernel(){
 	kernel.setArg(8, cl_textures);
 	kernel.setArg(9, white_point);
 	kernel.setArg(10, ambient);
-	kernel.setArg(11, window_width);
-	kernel.setArg(12, window_height);
-	kernel.setArg(13, cl_vbo);
+	kernel.setArg(11, currTime);
+	kernel.setArg(12, window_width);
+	kernel.setArg(13, window_height);
+	kernel.setArg(14, cl_vbo);
 }
 
 void runKernel(){
@@ -961,6 +988,7 @@ void render(){
 
 	clock_end = std::chrono::high_resolution_clock::now();
 	int ms = std::chrono::duration_cast<std::chrono::milliseconds>(clock_end - clock_start).count();
+	currTime = ms / 1000.0;
 	int frame_ms = std::chrono::duration_cast<std::chrono::milliseconds>(clock_end - clock_prev).count();
 	std::cout << 1000.0 / frame_ms << " fps\taverage: " << 1000.0*framenumber / ms << std::endl;
 	clock_prev = std::chrono::high_resolution_clock::now();
@@ -986,13 +1014,14 @@ void render(){
 
 	double x = ms / 400.0;
 
+	/*
 	TRS(&cpu_objects[5], double3(1, 2*sin(x + 3.14159 / 2) - 3.5, 13), 0, double3(0, 1, 0), double3(0.5, 0.5 * (0.8 * sin(1.0 - pow(sin(x/2), 10))/sin(1) + 0.2), 0.5));
 
 	TRS(&cpu_objects[6], double3(4 * sin(ms / 2000.0), -0.5, 9), -3.1415926 / 2 * ms / 3000.0, double3(0, 1, 0), double3(10, 10, -10));
 
 	TRS(&cpu_objects[7], double3(-1, -1.5, 9 + 2 * sin(ms/1500.0)), ms/500.0, double3(0, 1, 0), double3(1, 1, 1));
-
-	queue.enqueueWriteBuffer(cl_objects, CL_TRUE, 0, object_count * sizeof(Object), cpu_objects);
+	*/
+	//queue.enqueueWriteBuffer(cl_objects, CL_TRUE, 0, object_count * sizeof(Object), cpu_objects);
 
 	kernel.setArg(0, cl_objects);
 
