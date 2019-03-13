@@ -20,7 +20,7 @@
 // cleanup()
 // check for cl-gl interop
 
-const int object_count = 7;
+const int object_count = 20;
 
 std::chrono::time_point<std::chrono::high_resolution_clock> clock_start, clock_end, clock_prev;
 double currTime = 0;
@@ -62,8 +62,8 @@ struct Object
 {
 	cl_double4 M[4];
 	cl_double4 InvM[4];
-	cl_double4 Lorentz[4];
-	cl_double4 InvLorentz[4];
+	cl_double4 Lorentz[4] = { {{1,0,0,0}},{{0,1,0,0}},{{0,0,1,0}},{0,0,0,1} };
+	cl_double4 InvLorentz[4] = { {{1,0,0,0}},{{0,1,0,0}},{{0,0,1,0}},{0,0,0,1} };
 	cl_double3 color;
 	enum objectType type;
 	int meshIndex;
@@ -855,18 +855,42 @@ void initScene(Object* cpu_objects) {
 	*/
 	queue.enqueueWriteBuffer(cl_objects, CL_TRUE, 0, object_count * sizeof(Object), cpu_objects);
 
-	white_point = double3(10, 10, 10);
-	ambient = 0.5;
-
+	white_point = double3(1, 1, 1);
+	ambient = 1;
+	cpu_objects[0].color = float3(1, 1, 1);
+	cpu_objects[0].type = SPHERE;
+	cpu_objects[0].textureIndex = textureValues[0];
+	cpu_objects[0].textureWidth = textureValues[1];
+	cpu_objects[0].textureHeight = textureValues[2];
+	TRS(&cpu_objects[0], double3(10 + 3, -2, 25), 3.1415926 / 4, double3(0, 1, 0), double3(1, 1, 1));
+	setLorentzBoost(&cpu_objects[0], double3(9.0 / (10 * sqrt(2.0)), 0, 9.0 / (10 * sqrt(2.0))));
+	for (int i = 1; i < object_count/2; i++) {
+		cpu_objects[i].color = double3(i%3==0 ? 1.0:0.0, i%3==1?1.0:0.0, i%3==2?1.0:0.0);
+		cpu_objects[i].type = SPHERE;
+		TRS(&cpu_objects[i], double3(2*sqrt(2.0)*i-10.0 + 3, -2, 2*sqrt(2.0)*i+5), 3.1415926 / 4, double3(0, 1, 0), double3(1, 1, 1));
+	}
+	cpu_objects[object_count/2].color = float3(1, 1, 1);
+	cpu_objects[object_count/2].type = SPHERE;
+	cpu_objects[object_count/2].textureIndex = textureValues[0];
+	cpu_objects[object_count/2].textureWidth = textureValues[1];
+	cpu_objects[object_count/2].textureHeight = textureValues[2];
+	TRS(&cpu_objects[object_count/2], double3(-5 + 3, 2, 10), 3.1415926 / 4, double3(0, 1, 0), double3(1, 1, 1));
+	setLorentzBoost(&cpu_objects[object_count/2], double3(-9.0 / (10 * sqrt(2.0)), 0, -9.0 / (10 * sqrt(2.0))));
+	for (int i = object_count / 2 + 1; i < object_count; i++) {
+		cpu_objects[i].color = double3(i % 3 == 1 ? 1.0 : 0.0, i % 3 == 2 ? 1.0 : 0.0, i % 3 == 0 ? 1.0 : 0.0);
+		cpu_objects[i].type = SPHERE;
+		TRS(&cpu_objects[i], double3(2 * sqrt(2.0)*(i-object_count/2) - 10.0 + 3, 2, 2 * sqrt(2.0)*(i - object_count / 2)+5), 3.1415926 / 4, double3(0, 1, 0), double3(1, 1, 1));
+	}
+	/*
 	// left wall
 	cpu_objects[0].color = float3(0.75f, 0.25f, 0.25f);
 	cpu_objects[0].type = CUBE;
-	TRS(&cpu_objects[0], double3(-6, 0, 10), 0, double3(0, 1, 0), double3(0.1f, 10, 10));
+	TRS(&cpu_objects[0], double3(60, 0, 10), 0, double3(0, 1, 0), double3(0.1f, 10, 10));
 
 	// right wall
 	cpu_objects[1].color = float3(0.25f, 0.25f, 0.75f);
 	cpu_objects[1].type = CUBE;
-	TRS(&cpu_objects[1], double3(6, 0, 10), 0, double3(0, 1, 0), double3(0.1f, 10, 10));
+	TRS(&cpu_objects[1], double3(60, 0, 10), 0, double3(0, 1, 0), double3(0.1f, 10, 10));
 
 	// floor
 	cpu_objects[2].color = float3(0.25f, 0.75f, 0.25f);
@@ -878,13 +902,14 @@ void initScene(Object* cpu_objects) {
 	cpu_objects[3].type = CUBE;
 	TRS(&cpu_objects[3], double3(0, 6, 10), 0, double3(0, 1, 0), double3(10, 0.1f, 10));
 
-	// front wall 
+	// cube
 	cpu_objects[4].color = float3(0.9f, 0.8f, 0.7f);
 	cpu_objects[4].type = CUBE;
 	cpu_objects[4].textureIndex = textureValues[6];
 	cpu_objects[4].textureWidth = textureValues[7];
 	cpu_objects[4].textureHeight = textureValues[8];
-	TRS(&cpu_objects[4], double3(0, 0, 16), 0, double3(0, 1, 0), double3(6, 6, 0.1f));
+	TRS(&cpu_objects[4], double3(-4, 0, 5), 0.001, double3(0, 1, 0), double3(1, 1, 1));
+	setLorentzBoost(&cpu_objects[4], double3(0.6, 0, 0));
 
 	// Sphere
 	cpu_objects[5].color = float3(1, 1, 1);
@@ -892,15 +917,14 @@ void initScene(Object* cpu_objects) {
 	cpu_objects[5].textureIndex = textureValues[0];
 	cpu_objects[5].textureWidth = textureValues[1];
 	cpu_objects[5].textureHeight = textureValues[2];
-	TRS(&cpu_objects[5], double3(-1, -1.5, 11), 0, double3(0, 1, 0), double3(1, 1, 1));
-	setLorentzBoost(&cpu_objects[5], double3(0.2, 0, 0));
+	TRS(&cpu_objects[5], double3(0, -1.5, 11), 0, double3(0, 1, 0), double3(1, 1, 1));
+	setLorentzBoost(&cpu_objects[5], double3(0, 0, 0.9));
 
 	// Light
 	cpu_objects[6].color = white_point;
 	cpu_objects[6].type = SPHERE;
 	cpu_objects[6].light = true;
 	TRS(&cpu_objects[6], double3(0, 5, 10), 0, double3(0, 1, 0), double3(0.1, 0.1, 0.1));
-	setLorentzBoost(&cpu_objects[6], double3(0, 0, 0));
 	/*
 	// Pear
 	cpu_objects[5].color = float3(169/255.0, 168/255.0, 54/255.0);
@@ -948,7 +972,7 @@ void runKernel(){
 	// every pixel in the image has its own thread or "work item",
 	// so the total amount of work items equals the number of pixels
 	std::size_t global_work_size = window_width * window_height;
-	std::size_t local_work_size = kernel.getWorkGroupInfo<CL_KERNEL_WORK_GROUP_SIZE>(device);;
+	std::size_t local_work_size = kernel.getWorkGroupInfo<CL_KERNEL_WORK_GROUP_SIZE>(device);
 
 	// Ensure the global work size is a multiple of local work size
 	if (global_work_size % local_work_size != 0)
@@ -1009,21 +1033,25 @@ void render(){
 		glBufferData(GL_ARRAY_BUFFER, size, 0, GL_DYNAMIC_DRAW);
 		cl_vbo = cl::BufferGL(context, CL_MEM_WRITE_ONLY, vbo);
 		cl_vbos[0] = cl_vbo;
-		initCLKernel();
+		kernel.setArg(12, window_width);
+		kernel.setArg(13, window_height);
+		kernel.setArg(14, cl_vbo);
 	}
+	double s = ms / 1000.0;
+	//TRS(&cpu_objects[4], double3(-10, 0, 5), 3.1415926/2 * floor(ms / 2000.0), double3(0, 1, 0), double3(1, 1, 1));
+	/*
 
 	double x = ms / 400.0;
-
-	/*
 	TRS(&cpu_objects[5], double3(1, 2*sin(x + 3.14159 / 2) - 3.5, 13), 0, double3(0, 1, 0), double3(0.5, 0.5 * (0.8 * sin(1.0 - pow(sin(x/2), 10))/sin(1) + 0.2), 0.5));
 
 	TRS(&cpu_objects[6], double3(4 * sin(ms / 2000.0), -0.5, 9), -3.1415926 / 2 * ms / 3000.0, double3(0, 1, 0), double3(10, 10, -10));
 
 	TRS(&cpu_objects[7], double3(-1, -1.5, 9 + 2 * sin(ms/1500.0)), ms/500.0, double3(0, 1, 0), double3(1, 1, 1));
 	*/
-	//queue.enqueueWriteBuffer(cl_objects, CL_TRUE, 0, object_count * sizeof(Object), cpu_objects);
+	queue.enqueueWriteBuffer(cl_objects, CL_TRUE, 0, object_count * sizeof(Object), cpu_objects);
 
 	kernel.setArg(0, cl_objects);
+	kernel.setArg(11, fmod(currTime, 15.0));
 
 	runKernel();
 

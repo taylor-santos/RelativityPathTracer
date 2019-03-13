@@ -60,7 +60,7 @@ Ray createCamRay(const double x_coord, const double y_coord, const int width, co
 
 	/* create camera ray*/
 	Ray ray;
-	ray.origin = (double3)(0, 0, -4); /* fixed camera position */
+	ray.origin = (double3)(0, 0, 0); /* fixed camera position */
 	ray.dir = normalize(pixel_pos); /* vector from camera to pixel on screen */
 	return ray;
 }
@@ -301,7 +301,24 @@ bool intersect_octree(
 	return false;
 }
 
+double max3(double3 v) { return max(max(v.x, v.y), v.z); }
+
 bool intersect_cube(global const Object *objects, int index, const Ray *ray, Hit *hit) {
+	/* http://www.jcgt.org/published/0007/03/04/paper-lowres.pdf */
+	Ray newRay;
+	double3 origin = transformPoint(objects[index].InvM, ray->origin);
+	double3 dir = transformDirection(objects[index].InvM, ray->dir);
+	double scale = length(dir);
+	dir /= scale;
+
+	double winding = max3(fabs(origin)) < 1.0 ? -1.0 : 1.0;
+	double3 sgn = -sign(dir);
+	double3 d = (winding * sgn - origin) / dir;
+	const double2 one = (double2)(1, 1);
+# define TEST(U, VW) (d.U >= 0.0) && all(isless(fabs(origin.VW + dir.VW * d.U), one))
+	sgn = TEST(x, yz) ? (double3)(sgn.x, 0, 0) : (TEST(y, zx) ? (double3)(0, sgn.y, 0) :
+		(double3)(0, 0, TEST(z, xy) ? sgn.z : 0));# undef TEST	double dist = (sgn.x != 0) ? d.x : ((sgn.y != 0) ? d.y : d.z);	double3 objPt = origin + dir * dist;	hit->uv = (sgn.x != 0) ? (objPt.yz + 1) / 2 : ((sgn.y != 0) ? (objPt.xz + 1) / 2 : (objPt.xy + 1) / 2);	double3 worldPt = transformPoint(objects[index].M, objPt);	hit->dist = length(worldPt - ray->origin) / scale;	hit->normal = normalize(applyTranspose(objects[index].InvM, sgn));	return (sgn.x != 0) || (sgn.y != 0) || (sgn.z != 0);
+	/*
 	double3 origin = transformPoint(objects[index].InvM, ray->origin);
 	double3 dir = normalize(transformDirection(objects[index].InvM, ray->dir));
 	double3 dir_inv = 1.0 / dir;
@@ -338,16 +355,20 @@ bool intersect_cube(global const Object *objects, int index, const Ray *ray, Hit
 		}
 		double3 worldPt = transformPoint(objects[index].M, pt);
 		hit->dist = length(worldPt - ray->origin);
-		hit->normal = normalize(applyTranspose(objects[index].InvM, normal));
+		hit->normal = applyTranspose(objects[index].InvM, normal);
+		hit->normal = normalize(hit->normal);
 		hit->uv = uv;
 		return true;
 	}
 	return false;
+	*/
 }
 
 bool intersect_sphere(global const Object *objects, const int index, const Ray *ray, Hit *hit) {
 	double3 rayToSphere = -transformPoint(objects[index].InvM, ray->origin);
-	double3 dir = normalize(transformDirection(objects[index].InvM, ray->dir));
+	double3 dir = transformDirection(objects[index].InvM, ray->dir);
+	double scale = length(dir);
+	dir /= scale;
 	double b = dot(rayToSphere, dir);
 	double c = dot(rayToSphere, rayToSphere) - 1.0;
 	double disc = b * b - c;
@@ -363,7 +384,7 @@ bool intersect_sphere(global const Object *objects, const int index, const Ray *
 	}
 	double3 objPt = -rayToSphere + dir * dist;
 	double3 worldPt = transformPoint(objects[index].M, objPt);
-	hit->dist = length(worldPt - ray->origin);
+	hit->dist = dist / scale;
 	hit->normal = normalize(applyTranspose(objects[index].InvM, objPt));
 	hit->uv.s0 = 0.5 + atan2(objPt.z, objPt.x) / (2 * M_PI);
 	hit->uv.s1 = asin(objPt.y) / M_PI + 0.5;
@@ -444,17 +465,17 @@ bool intersect_scene(
 		Hit newHit;
 		newHit.dist = inf;
 		Ray newRay;
-		double4 newDir, newEvent;
+		double4 newEvent0 = (double4)(time, ray->origin);
+		double4 newEvent1 = newEvent0 + (double4)(-1.0, normalize(ray->dir));
+		newEvent0 = transformPoint4D(objects[i].Lorentz, newEvent0);
+		newEvent1 = transformPoint4D(objects[i].Lorentz, newEvent1);
+		double4 lightDir = newEvent1 - newEvent0;
+		newRay.origin = newEvent0.yzw;
+		newRay.dir = lightDir.yzw;
+
 		switch (objects[i].type) {
 		case SPHERE:
-			newEvent = (double4)(time, ray->origin);
-			newRay.origin = transformPoint4D(objects[i].Lorentz, newEvent).yzw;
-			newDir = transformPoint4D(objects[i].Lorentz, (double4)(1, ray->dir));
-			newRay.dir = normalize(newDir.yzw);
 			if (intersect_sphere(objects, i, &newRay, &newHit)) {
-				newEvent += (double4)(0, newRay.dir) * newHit.dist;
-				newEvent = transformPoint4D(objects[i].InvLorentz, newEvent);
-				newHit.dist = length(newEvent.yzw - ray->origin);
 				if (newHit.dist < hit->dist) {
 					*hit = newHit;
 					hit->object = i;
@@ -463,7 +484,25 @@ bool intersect_scene(
 			}
 			break;
 		case CUBE:
+			if (intersect_cube(objects, i, &newRay, &newHit)) {
+				if (newHit.dist < hit->dist) {
+					*hit = newHit;
+					hit->object = i;
+					didHit = true;
+				}
+			}
+			break;
+			/*
+		case CUBE:
+			newEvent = (double4)(time, ray->origin);
+			newRay.origin = transformPoint4D(objects[i].Lorentz, newEvent).yzw;
+		//	newDir = transformPoint4D(objects[i].Lorentz, (double4)(1, ray->dir));
+		//	newRay.dir = normalize(newDir.yzw);
 			if (intersect_cube(objects, i, ray, &newHit)) {
+		//		newEvent += (double4)(-1, newRay.dir) * newHit.dist;
+		//		newEvent = transformPoint4D(objects[i].InvLorentz, newEvent);
+		//		newEvent.x = 0;
+		//		newHit.dist = length(newEvent.yzw - ray->origin);
 				if (newHit.dist < hit->dist) {
 					*hit = newHit;
 					hit->object = i;
@@ -480,7 +519,9 @@ bool intersect_scene(
 				}
 			}
 			break;
+			*/
 		}
+		
 	}
 	if (didHit) {
 		if (dot(hit->normal, ray->dir) > 0) {
@@ -536,7 +577,7 @@ double3 trace(
 	if (objects[hit.object].light) {
 		color += hit.color;
 	}
-
+	/*
 	for (int i = 0; i < object_count; i++) {
 		if (i != hit.object && objects[i].light) {
 			double3 light_pos = transformPoint(objects[i].M, (double3)(0, 0, 0));
@@ -554,6 +595,7 @@ double3 trace(
 			}
 		}
 	}
+	*/
 	return color;
 }
 
