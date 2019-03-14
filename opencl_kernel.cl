@@ -34,6 +34,7 @@ typedef struct Hit {
 	double3 normal;
 	double2 uv;
 	double3 color;
+	double4 event;
 	int object;
 } Hit;
 
@@ -327,16 +328,15 @@ bool intersect_cube(global const Object *objects, int index, const Ray *ray, Hit
 	double3 objPt = origin + dir * dist;
 	hit->uv = (sgn.x != 0) ? (objPt.yz + 1) / 2 : ((sgn.y != 0) ? (objPt.xz + 1) / 2 : (objPt.xy + 1) / 2);
 	double3 worldPt = transformPoint(objects[index].M, objPt);
-	hit->dist = length(worldPt - ray->origin) / scale;
+	
+	hit->dist = length(worldPt - ray->origin);
 	hit->normal = normalize(applyTranspose(objects[index].InvM, sgn));
 	return (sgn.x != 0) || (sgn.y != 0) || (sgn.z != 0);
 }
 
 bool intersect_sphere(global const Object *objects, const int index, const Ray *ray, Hit *hit) {
 	double3 rayToSphere = -transformPoint(objects[index].InvM, ray->origin);
-	double3 dir = transformDirection(objects[index].InvM, ray->dir);
-	double scale = length(dir);
-	dir /= scale;
+	double3 dir = normalize(transformDirection(objects[index].InvM, ray->dir));
 	double b = dot(rayToSphere, dir);
 	double c = dot(rayToSphere, rayToSphere) - 1.0;
 	double disc = b * b - c;
@@ -351,8 +351,7 @@ bool intersect_sphere(global const Object *objects, const int index, const Ray *
 		return false;
 	}
 	double3 objPt = -rayToSphere + dir * dist;
-	double3 worldPt = transformPoint(objects[index].M, objPt);
-	hit->dist = dist / scale;
+	hit->dist = dist;
 	hit->normal = normalize(applyTranspose(objects[index].InvM, objPt));
 	hit->uv.s0 = 0.5 + atan2(objPt.z, objPt.x) / (2 * M_PI);
 	hit->uv.s1 = asin(objPt.y) / M_PI + 0.5;
@@ -434,7 +433,8 @@ bool intersect_scene(
 		newHit.dist = inf;
 		Ray newRay;
 		double4 newEvent0 = objects[i].stationaryCam;
-		double4 lightDir = (double4)(-1, normalize(ray->dir));
+		newHit.event = newEvent0;
+		double4 lightDir = (double4)(0, normalize(ray->dir));
 		lightDir = transformPoint4D(objects[i].Lorentz, lightDir);
 		newRay.origin = newEvent0.yzw;
 		newRay.dir = lightDir.yzw;
@@ -448,6 +448,7 @@ bool intersect_scene(
 						dot(newHit.normal, objects[i].InvLorentz[2].yzw),
 						dot(newHit.normal, objects[i].InvLorentz[3].yzw)
 					);
+					double4 event = newEvent0 + lightDir * newHit.dist;
 					newHit.normal = normalize(newNorm);
 					*hit = newHit;
 					hit->object = i;
@@ -458,6 +459,13 @@ bool intersect_scene(
 		case CUBE:
 			if (intersect_cube(objects, i, &newRay, &newHit)) {
 				if (newHit.dist < hit->dist) {
+					double3 newNorm = (double3)(
+						dot(newHit.normal, objects[i].InvLorentz[1].yzw),
+						dot(newHit.normal, objects[i].InvLorentz[2].yzw),
+						dot(newHit.normal, objects[i].InvLorentz[3].yzw)
+						);
+					newHit.event -= lightDir * newHit.dist;
+					newHit.normal = normalize(newNorm);
 					*hit = newHit;
 					hit->object = i;
 					didHit = true;
@@ -491,6 +499,8 @@ bool intersect_scene(
 		else {
 			hit->color = objects[hit->object].color;
 		}
+		double k = 0.5;
+		hit->color *= (hit->dist - k * floor(hit->dist / k))/k;
 		return true;
 	}
 	return false;

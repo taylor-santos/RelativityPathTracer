@@ -339,6 +339,9 @@ cl_double3 operator*(const cl_double3 &v, const double &c) {
 		v.z * c
 	);
 }
+cl_double3 operator*(const double &c, const cl_double3 &v) {
+	return v * c;
+}
 
 cl_double3 operator/(const cl_double3 &v, const double &c) {
 	return double3(
@@ -867,14 +870,40 @@ void initScene(Object* cpu_objects) {
 	cpu_objects[0].textureHeight = textureValues[2];
 	*/
 	//cpu_objects[0].meshIndex = theMesh.meshIndices[0];
-	TRS(&cpu_objects[0], double3(10 + 3, -2, 25), 3.1415926 / 4, double3(0, 1, 0), double3(1, 1, 1));
-	setLorentzBoost(&cpu_objects[0], double3(0.999 / sqrt(2.0), 0, 0.999 / sqrt(2.0)));
+	
+
+	cl_double3 p0 = double3(2 * sqrt(2.0) - 10.0 + 3, -4, 2 * sqrt(2.0) + 5);
+	cl_double3 dir = double3(1, 0, 1);
+	dir = normalize(dir);
+
+	double cosC = dot(-1 * dir, normalize(p0));
+	std::cout << cosC << std::endl;
+	double b = magnitude(p0);
+
+	setLorentzBoost(&cpu_objects[0], 0.9 * dir);
+	TRS(&cpu_objects[0], p0, 3.1415926 / 4, double3(0, 1, 0), double3(1, 1, 1));
 	//TRS(&cpu_objects[0], double3(0, 0, 1), 3.1415926 / 4, double3(0, 1, 0), double3(0.1, 0.1, 0.1));
-	for (int i = 1; i < object_count/2; i++) {
+	for (int i = 1; i < object_count - 2; i++) {
 		cpu_objects[i].color = double3(i%3==0 ? 1.0:0.0, i%3==1?1.0:0.0, i%3==2?1.0:0.0);
 		cpu_objects[i].type = SPHERE;
-		TRS(&cpu_objects[i], double3(2*sqrt(2.0)*i-10.0 + 3, -2, 2*sqrt(2.0)*i+5), 3.1415926 / 4, double3(0, 1, 0), double3(1, 1, 1));
+		double c = magnitude(p0) + 2.0 * (i-1);
+		double a = b * cosC + sqrt(-b * b + c * c + b * b*cosC*cosC);
+		std::cout << "\t" << a << std::endl;
+		TRS(&cpu_objects[i], p0 + dir*a, 3.1415926 / 4, double3(0, 1, 0), double3(1, 1, 1));
+		std::cout << magnitude(p0 + dir * a) << std::endl;
 	}
+	cpu_objects[object_count-1].color = float3(0.9f, 0.8f, 0.7f);
+	cpu_objects[object_count-1].type = CUBE;
+	cpu_objects[object_count-1].textureIndex = textureValues[6];
+	cpu_objects[object_count-1].textureWidth = textureValues[7];
+	cpu_objects[object_count-1].textureHeight = textureValues[8];
+	TRS(&cpu_objects[object_count-1], double3(0, -4, 20), 0.001, double3(0, 1, 0), double3(40, -.1, 40));
+
+	cpu_objects[object_count - 2].color = float3(0.9f, 0.8f, 0.7f);
+	cpu_objects[object_count - 2].type = CUBE;
+	TRS(&cpu_objects[object_count - 2], double3(-10, 2, 20), 0.001, double3(0, 1, 0), double3(40, 1, 1));
+	setLorentzBoost(&cpu_objects[object_count - 2], double3(0.999, 0, 0));
+	/*
 	cpu_objects[object_count/2].color = double3(169 / 255.0, 168 / 255.0, 54 / 255.0);
 	cpu_objects[object_count/2].type = SPHERE;
 	//cpu_objects[object_count/2].meshIndex = theMesh.meshIndices[0];
@@ -1054,7 +1083,7 @@ void render(){
 	*/
 	queue.enqueueWriteBuffer(cl_objects, CL_TRUE, 0, object_count * sizeof(Object), cpu_objects);
 
-	cl_double4 cameraPos = double4(fmod(currTime, 15.0), 0, 0, 0);
+	cl_double4 cameraPos = double4(currTime, 0, 0, 0);
 	for (int i = 0; i < object_count; i++) {
 		cpu_objects[i].stationaryCam = double4(
 			dot(cpu_objects[i].Lorentz[0], cameraPos),
