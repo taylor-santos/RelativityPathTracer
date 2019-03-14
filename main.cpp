@@ -64,6 +64,7 @@ struct Object
 	cl_double4 InvM[4];
 	cl_double4 Lorentz[4] = { {{1,0,0,0}},{{0,1,0,0}},{{0,0,1,0}},{0,0,0,1} };
 	cl_double4 InvLorentz[4] = { {{1,0,0,0}},{{0,1,0,0}},{{0,0,1,0}},{0,0,0,1} };
+	cl_double4 stationaryCam;
 	cl_double3 color;
 	enum objectType type;
 	int meshIndex;
@@ -636,7 +637,7 @@ void Mesh::GenerateOctree(int firstTriIndex) {
 	}
 	int octreeIndex = octree.size();
 	octree.push_back(newOctree);
-	Subdivide(*this, octreeIndex, 0, 10);
+	Subdivide(*this, octreeIndex, 0, 15);
 	/*
 	ofstream f("octree.json");
 	json(*this, 0, f, 0);
@@ -836,7 +837,7 @@ void setLorentzBoost(Object *object, cl_double3 v) {
 };
 
 void initScene(Object* cpu_objects) {
-	if (!ReadTexture("textures/soccer.png")) {
+	if (!ReadTexture("textures/earth.jpg")) {
 		exit(EXIT_FAILURE);
 	}
 	if (!ReadTexture("textures/StanfordBunnyTerracotta.jpg")) {
@@ -849,6 +850,7 @@ void initScene(Object* cpu_objects) {
 	if (!ReadOBJ("models/pear.obj", theMesh)) {
 		exit(EXIT_FAILURE);
 	}
+	/*
 	if (!ReadOBJ("models/StanfordBunny.obj", theMesh)) {
 		exit(EXIT_FAILURE);
 	}
@@ -857,25 +859,27 @@ void initScene(Object* cpu_objects) {
 
 	white_point = double3(1, 1, 1);
 	ambient = 1;
-	cpu_objects[0].color = float3(1, 1, 1);
+	cpu_objects[0].color = double3(1, 1, 1);
 	cpu_objects[0].type = SPHERE;
+	/*
 	cpu_objects[0].textureIndex = textureValues[0];
 	cpu_objects[0].textureWidth = textureValues[1];
 	cpu_objects[0].textureHeight = textureValues[2];
+	*/
+	//cpu_objects[0].meshIndex = theMesh.meshIndices[0];
 	TRS(&cpu_objects[0], double3(10 + 3, -2, 25), 3.1415926 / 4, double3(0, 1, 0), double3(1, 1, 1));
-	setLorentzBoost(&cpu_objects[0], double3(9.0 / (10 * sqrt(2.0)), 0, 9.0 / (10 * sqrt(2.0))));
+	setLorentzBoost(&cpu_objects[0], double3(0.999 / sqrt(2.0), 0, 0.999 / sqrt(2.0)));
+	//TRS(&cpu_objects[0], double3(0, 0, 1), 3.1415926 / 4, double3(0, 1, 0), double3(0.1, 0.1, 0.1));
 	for (int i = 1; i < object_count/2; i++) {
 		cpu_objects[i].color = double3(i%3==0 ? 1.0:0.0, i%3==1?1.0:0.0, i%3==2?1.0:0.0);
 		cpu_objects[i].type = SPHERE;
 		TRS(&cpu_objects[i], double3(2*sqrt(2.0)*i-10.0 + 3, -2, 2*sqrt(2.0)*i+5), 3.1415926 / 4, double3(0, 1, 0), double3(1, 1, 1));
 	}
-	cpu_objects[object_count/2].color = float3(1, 1, 1);
+	cpu_objects[object_count/2].color = double3(169 / 255.0, 168 / 255.0, 54 / 255.0);
 	cpu_objects[object_count/2].type = SPHERE;
-	cpu_objects[object_count/2].textureIndex = textureValues[0];
-	cpu_objects[object_count/2].textureWidth = textureValues[1];
-	cpu_objects[object_count/2].textureHeight = textureValues[2];
+	//cpu_objects[object_count/2].meshIndex = theMesh.meshIndices[0];
 	TRS(&cpu_objects[object_count/2], double3(-5 + 3, 2, 10), 3.1415926 / 4, double3(0, 1, 0), double3(1, 1, 1));
-	setLorentzBoost(&cpu_objects[object_count/2], double3(-9.0 / (10 * sqrt(2.0)), 0, -9.0 / (10 * sqrt(2.0))));
+	setLorentzBoost(&cpu_objects[object_count/2], double3(-0.999 / sqrt(2.0), 0, -0.999 / sqrt(2.0)));
 	for (int i = object_count / 2 + 1; i < object_count; i++) {
 		cpu_objects[i].color = double3(i % 3 == 1 ? 1.0 : 0.0, i % 3 == 2 ? 1.0 : 0.0, i % 3 == 0 ? 1.0 : 0.0);
 		cpu_objects[i].type = SPHERE;
@@ -1050,8 +1054,18 @@ void render(){
 	*/
 	queue.enqueueWriteBuffer(cl_objects, CL_TRUE, 0, object_count * sizeof(Object), cpu_objects);
 
+	cl_double4 cameraPos = double4(fmod(currTime, 15.0), 0, 0, 0);
+	for (int i = 0; i < object_count; i++) {
+		cpu_objects[i].stationaryCam = double4(
+			dot(cpu_objects[i].Lorentz[0], cameraPos),
+			dot(cpu_objects[i].Lorentz[1], cameraPos),
+			dot(cpu_objects[i].Lorentz[2], cameraPos),
+			dot(cpu_objects[i].Lorentz[3], cameraPos)
+		);
+	}
+
 	kernel.setArg(0, cl_objects);
-	kernel.setArg(11, fmod(currTime, 15.0));
+	kernel.setArg(11, 0);
 
 	runKernel();
 
@@ -1088,25 +1102,25 @@ void main(int argc, char** argv){
 	queue.enqueueWriteBuffer(cl_objects, CL_TRUE, 0, object_count * sizeof(Object), cpu_objects);
 
 	cl_vertices = cl::Buffer(context, CL_MEM_READ_ONLY, theMesh.vertices.size() * sizeof(cl_double3));
-	queue.enqueueWriteBuffer(cl_vertices, CL_TRUE, 0, theMesh.vertices.size() * sizeof(cl_double3), &theMesh.vertices[0]);
+	queue.enqueueWriteBuffer(cl_vertices, CL_TRUE, 0, theMesh.vertices.size() * sizeof(cl_double3), theMesh.vertices.size() > 0 ? &theMesh.vertices[0] : NULL);
 
 	cl_normals = cl::Buffer(context, CL_MEM_READ_ONLY, theMesh.normals.size() * sizeof(cl_double3));
-	queue.enqueueWriteBuffer(cl_normals, CL_TRUE, 0, theMesh.normals.size() * sizeof(cl_double3), &theMesh.normals[0]);
+	queue.enqueueWriteBuffer(cl_normals, CL_TRUE, 0, theMesh.normals.size() * sizeof(cl_double3), theMesh.normals.size() > 0 ? &theMesh.normals[0] : NULL);
 	
 	cl_uvs = cl::Buffer(context, CL_MEM_READ_ONLY, theMesh.uvs.size() * sizeof(cl_double2));
-	queue.enqueueWriteBuffer(cl_uvs, CL_TRUE, 0, theMesh.uvs.size() * sizeof(cl_double2), &theMesh.uvs[0]);
+	queue.enqueueWriteBuffer(cl_uvs, CL_TRUE, 0, theMesh.uvs.size() * sizeof(cl_double2), theMesh.uvs.size() > 0 ? &theMesh.uvs[0] : NULL);
 
 	cl_triangles = cl::Buffer(context, CL_MEM_READ_ONLY, theMesh.triangles.size() * sizeof(unsigned int));
-	queue.enqueueWriteBuffer(cl_triangles, CL_TRUE, 0, theMesh.triangles.size() * sizeof(unsigned int), &theMesh.triangles[0]);
+	queue.enqueueWriteBuffer(cl_triangles, CL_TRUE, 0, theMesh.triangles.size() * sizeof(unsigned int), theMesh.triangles.size() > 0 ? &theMesh.triangles[0] : NULL);
 
 	cl_octrees = cl::Buffer(context, CL_MEM_READ_ONLY, theMesh.octree.size() * sizeof(Octree));
-	queue.enqueueWriteBuffer(cl_octrees, CL_TRUE, 0, theMesh.octree.size() * sizeof(Octree), &theMesh.octree[0]);
+	queue.enqueueWriteBuffer(cl_octrees, CL_TRUE, 0, theMesh.octree.size() * sizeof(Octree), theMesh.octree.size() > 0 ? &theMesh.octree[0] : NULL);
 	
 	cl_octreeTris = cl::Buffer(context, CL_MEM_READ_ONLY, theMesh.octreeTris.size() * sizeof(int));
-	queue.enqueueWriteBuffer(cl_octreeTris, CL_TRUE, 0, theMesh.octreeTris.size() * sizeof(int), &theMesh.octreeTris[0]);
+	queue.enqueueWriteBuffer(cl_octreeTris, CL_TRUE, 0, theMesh.octreeTris.size() * sizeof(int), theMesh.octreeTris.size() > 0 ? &theMesh.octreeTris[0] : NULL);
 
 	cl_textures = cl::Buffer(context, CL_MEM_READ_ONLY, textures.size() * sizeof(unsigned char));
-	queue.enqueueWriteBuffer(cl_textures, CL_TRUE, 0, textures.size() * sizeof(unsigned char), &textures[0]);
+	queue.enqueueWriteBuffer(cl_textures, CL_TRUE, 0, textures.size() * sizeof(unsigned char), textures.size() > 0 ? &textures[0] : NULL);
 
 	// create OpenCL buffer from OpenGL vertex buffer object
 	cl_vbo = cl::BufferGL(context, CL_MEM_WRITE_ONLY, vbo);
