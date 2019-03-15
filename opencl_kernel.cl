@@ -317,6 +317,8 @@ bool intersect_cube(global const Object *objects, int index, const Ray4D *ray, H
 	Ray newRay;
 	double3 origin = transformPoint(objects[index].InvM, ray->origin.yzw);
 	double3 dir = transformDirection(objects[index].InvM, ray->dir.yzw);
+	double scale = length(dir);
+	dir /= scale;
 	double winding = max3(fabs(origin)) < 1.0 ? -1.0 : 1.0;
 	double3 sgn = -sign(dir);
 	double3 d = (winding * sgn - origin) / dir;
@@ -327,11 +329,9 @@ bool intersect_cube(global const Object *objects, int index, const Ray4D *ray, H
 # undef TEST
 	double dist = (sgn.x != 0) ? d.x : ((sgn.y != 0) ? d.y : d.z);
 	double3 objPt = origin + dir * dist;
-	double3 worldPt = transformPoint(objects[index].M, objPt);
-	hit->uv = (sgn.x != 0) ? (objPt.yz + 1) / 2 : ((sgn.y != 0) ? (objPt.xz + 1) / 2 : (objPt.xy + 1) / 2);
-	
-	hit->dist = dist * length(ray->dir);
+	hit->dist = dist / scale;
 	hit->normal = normalize(applyTranspose(objects[index].InvM, sgn));
+	hit->uv = (sgn.x != 0) ? (objPt.yz + 1) / 2 : ((sgn.y != 0) ? (objPt.xz + 1) / 2 : (objPt.xy + 1) / 2);
 	return (sgn.x != 0) || (sgn.y != 0) || (sgn.z != 0);
 }
 
@@ -391,7 +391,7 @@ bool intersect_scene(
 		double4 newEvent0 = objects[i].stationaryCam;
 		double4 lightDir = (double4)(-1, normalize(ray->dir)); //Set t=0 for spacelike, set t=-1 for lightlike
 		lightDir = transformPoint4D(objects[i].Lorentz, lightDir);
-		lightDir /= length(lightDir.yzw);
+		//lightDir /= length(lightDir.yzw);
 		newRay.origin = newEvent0;
 		newRay.dir = lightDir;
 
@@ -399,15 +399,21 @@ bool intersect_scene(
 		case SPHERE:
 			if (intersect_sphere(objects, i, &newRay, &newHit)) {
 				if (newHit.dist < hit->dist) {
-					double3 newNorm = (double3)(
-						dot(newHit.normal, objects[i].InvLorentz[1].yzw),
-						dot(newHit.normal, objects[i].InvLorentz[2].yzw),
-						dot(newHit.normal, objects[i].InvLorentz[3].yzw)
-					);
 					event = newEvent0 + lightDir * newHit.dist;
-					double4 localEvent = transformPoint4D(objects[i].InvLorentz, event);
-					newHit.dist = length(localEvent.yzw - ray->origin);
-					newHit.normal = normalize(newNorm);
+					//double4 localEvent = transformPoint4D(objects[i].InvLorentz, event);
+					//newHit.dist = length(localEvent.yzw - ray->origin);
+					*hit = newHit;
+					hit->object = i;
+					didHit = true;
+				}
+			}
+			break;
+		case CUBE:
+			if (intersect_cube(objects, i, &newRay, &newHit)) {
+				if (newHit.dist < hit->dist) {
+					event = newEvent0 + lightDir * newHit.dist;
+					//double4 localEvent = transformPoint4D(objects[i].InvLorentz, event);
+					//newHit.dist = length(localEvent.yzw - ray->origin);
 					*hit = newHit;
 					hit->object = i;
 					didHit = true;
@@ -415,23 +421,6 @@ bool intersect_scene(
 			}
 			break;
 			/*
-		case CUBE:
-			if (intersect_cube(objects, i, &newRay, &newHit)) {
-				if (newHit.dist < hit->dist) {
-					double3 newNorm = (double3)(
-						dot(newHit.normal, objects[i].InvLorentz[1].yzw),
-						dot(newHit.normal, objects[i].InvLorentz[2].yzw),
-						dot(newHit.normal, objects[i].InvLorentz[3].yzw)
-					);
-					event = newEvent0 + normalize(lightDir) * newHit.dist;
-					newHit.dist /= length(lightDir.yzw);
-					newHit.normal = normalize(newNorm);
-					*hit = newHit;
-					hit->object = i;
-					didHit = true;
-				}
-			}
-			break;
 		case MESH:
 			if (intersect_octree(objects, i, vertices, normals, uvs, triangles, octrees, octreeTris, &newRay, &newHit)) {
 				if (newHit.dist < hit->dist) {
@@ -448,20 +437,64 @@ bool intersect_scene(
 	if (didHit) {
 		if (objects[hit->object].textureIndex != -1) {
 			int width = objects[hit->object].textureWidth;
-			int x = width * hit->uv.s0;
-			int y = objects[hit->object].textureHeight * (1.0 - hit->uv.s1);
+			double u = width * hit->uv.s0;
+			double v = objects[hit->object].textureHeight * (1.0 - hit->uv.s1);
+			int x = floor(u);
+			int y = floor(v);
+			double u_ratio = u - x;
+			double v_ratio = v - y;
+			double u_opp = 1 - u_ratio;
+			double v_opp = 1 - v_ratio;
+
 			int offset = objects[hit->object].textureIndex;
-			hit->color = (double3)(
+			double3 result = (double3)(
 				textures[offset + 3 * (width * y + x) + 0] / 255.0,
 				textures[offset + 3 * (width * y + x) + 1] / 255.0,
 				textures[offset + 3 * (width * y + x) + 2] / 255.0
-			);
+			) * u_opp;
+			x++;
+			result += (double3)(
+				textures[offset + 3 * (width * y + x) + 0] / 255.0,
+				textures[offset + 3 * (width * y + x) + 1] / 255.0,
+				textures[offset + 3 * (width * y + x) + 2] / 255.0
+			) * u_ratio;
+			result *= v_opp;
+			y++;
+			double3 result2 = (double3)(
+				textures[offset + 3 * (width * y + x) + 0] / 255.0,
+				textures[offset + 3 * (width * y + x) + 1] / 255.0,
+				textures[offset + 3 * (width * y + x) + 2] / 255.0
+			) * u_ratio;
+			x--;
+			result2 += (double3)(
+				textures[offset + 3 * (width * y + x) + 0] / 255.0,
+				textures[offset + 3 * (width * y + x) + 1] / 255.0,
+				textures[offset + 3 * (width * y + x) + 2] / 255.0
+			) * u_opp;
+			result2 *= v_ratio;
+
+			hit->color = result + result2;
 		}
 		else {
 			hit->color = objects[hit->object].color;
 		}
-		double k = 2;
+		double k = 10.0;
+		if ((event.x - k * floor(event.x / k)) / k < 0.1) {
+			hit->color = (double3)(0,0,0);
+		}
+		/*
+		
 		hit->color *= (event.x - k * floor(event.x / k))/k;
+		*/
+		//hit->color *= 1.0 - hit->dist / (hit->dist + 1.0);
+		/*
+		double d = hit->dist / 1000.0;
+		int r = d * 255.0;
+		int g = fmod(d * 255.0, 1.0) * 255.0;
+		int b = fmod(fmod(d * 255.0, 1.0) * 255.0, 1.0) * 255.0;
+
+		hit->color = (double3)(r / 255.0, g / 255.0, b / 255.0);
+		*/
 		return true;
 	}
 	return false;
@@ -494,7 +527,8 @@ double3 trace(
 	double3 hitpoint = camray->origin + camray->dir * hit.dist;
 	double3 normal = hit.normal;
 
-	double3 color = hit.color * (normal.y > 0 ? normal.y + 0.2 : 0.2);
+	double3 color = hit.color;// *(normal.y > 0 ? normal.y + 0.2 : 0.2);
+
 	if (objects[hit.object].light) {
 		color += hit.color;
 	}
@@ -565,7 +599,7 @@ __kernel void render_kernel(
 		}
 	}
 	finalcolor = finalcolor / (MSAASAMPLES*MSAASAMPLES);
-	finalcolor = hable(finalcolor) / hable(white_point * (1.0 + ambient));
+	finalcolor = hable(finalcolor) / hable(white_point);
 	finalcolor = min(finalcolor, 1.0);
 
 	union Colour fcolour;
