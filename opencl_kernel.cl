@@ -333,6 +333,7 @@ bool intersect_cube(global const Object *objects, int index, const Ray4D *ray, H
 	hit->normal = normalize(applyTranspose(objects[index].InvM, sgn));
 	hit->uv = (sgn.x != 0) ? (objPt.yz + 1) / 2 : ((sgn.y != 0) ? (objPt.xz + 1) / 2 : (objPt.xy + 1) / 2);
 	return (sgn.x != 0) || (sgn.y != 0) || (sgn.z != 0);
+
 }
 
 bool intersect_sphere(global const Object *objects, const int index, const Ray4D *ray, Hit *hit) {
@@ -437,10 +438,11 @@ bool intersect_scene(
 	if (didHit) {
 		if (objects[hit->object].textureIndex != -1) {
 			int width = objects[hit->object].textureWidth;
+			int height = objects[hit->object].textureHeight;
 			double u = width * hit->uv.s0;
-			double v = objects[hit->object].textureHeight * (1.0 - hit->uv.s1);
-			int x = floor(u);
-			int y = floor(v);
+			double v = height * (1.0 - hit->uv.s1);
+			int x = min((int)floor(u), width - 1);
+			int y = min((int)floor(v), height - 1);
 			double u_ratio = u - x;
 			double v_ratio = v - y;
 			double u_opp = 1 - u_ratio;
@@ -452,20 +454,20 @@ bool intersect_scene(
 				textures[offset + 3 * (width * y + x) + 1] / 255.0,
 				textures[offset + 3 * (width * y + x) + 2] / 255.0
 			) * u_opp;
-			x++;
+			x = clamp(x + 1, 0, width - 1);
 			result += (double3)(
 				textures[offset + 3 * (width * y + x) + 0] / 255.0,
 				textures[offset + 3 * (width * y + x) + 1] / 255.0,
 				textures[offset + 3 * (width * y + x) + 2] / 255.0
 			) * u_ratio;
 			result *= v_opp;
-			y++;
+			y = clamp(y + 1, 0, height - 1);
 			double3 result2 = (double3)(
 				textures[offset + 3 * (width * y + x) + 0] / 255.0,
 				textures[offset + 3 * (width * y + x) + 1] / 255.0,
 				textures[offset + 3 * (width * y + x) + 2] / 255.0
 			) * u_ratio;
-			x--;
+			x = clamp(x - 1, 0, width - 1);
 			result2 += (double3)(
 				textures[offset + 3 * (width * y + x) + 0] / 255.0,
 				textures[offset + 3 * (width * y + x) + 1] / 255.0,
@@ -478,10 +480,13 @@ bool intersect_scene(
 		else {
 			hit->color = objects[hit->object].color;
 		}
-		double k = 10.0;
-		if ((event.x - k * floor(event.x / k)) / k < 0.1) {
-			hit->color = (double3)(0,0,0);
+		/* // Periodic Flash
+		double period = 2;
+		double duration = 1;
+		if (event.x - period * floor(event.x / period) < duration) {
+			hit->color += (double3)(0.5, 0.5, 0.5);
 		}
+		*/
 		/*
 		
 		hit->color *= (event.x - k * floor(event.x / k))/k;

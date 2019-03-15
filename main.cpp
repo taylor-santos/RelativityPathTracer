@@ -862,8 +862,6 @@ void initScene(Object* cpu_objects) {
 
 	white_point = double3(1, 1, 1);
 	ambient = 1;
-	cpu_objects[0].color = double3(1, 1, 1);
-	cpu_objects[0].type = SPHERE;
 	/*
 	cpu_objects[0].textureIndex = textureValues[0];
 	cpu_objects[0].textureWidth = textureValues[1];
@@ -873,7 +871,7 @@ void initScene(Object* cpu_objects) {
 
 
 
-	cl_double3 p0 = double3(2 * sqrt(2.0) - 10.0 + 3, -2, 2 * sqrt(2.0) + 5);
+	cl_double3 p0 = double3(2 * sqrt(2.0) - 10.0 + 3, -4, 2 * sqrt(2.0) + 5);
 	cl_double3 dir = double3(1, 0, 1);
 	dir = normalize(dir);
 
@@ -881,13 +879,27 @@ void initScene(Object* cpu_objects) {
 	std::cout << cosC << std::endl;
 	double b = magnitude(p0);
 
-	setLorentzBoost(&cpu_objects[0], 0.999 * dir);
-	TRS(&cpu_objects[0], p0 + 100 * dir, 0, double3(0, 1, 0), double3(1, 1, 1));
-	//TRS(&cpu_objects[0], double3(0, 0, 1), 3.1415926 / 4, double3(0, 1, 0), double3(0.1, 0.1, 0.1));
+	
+
+	cl_double3 offset = double3(0, 2, 0);
+	cpu_objects[0].color = double3(0.2, 0.2, 0.2);
+	cpu_objects[0].textureIndex = textureValues[0];
+	cpu_objects[0].textureWidth = textureValues[1];
+	cpu_objects[0].textureHeight = textureValues[2];
+	cpu_objects[0].type = SPHERE;
+	TRS(&cpu_objects[0], p0 + 10 * dir + offset, 0, double3(0, 1, 0), double3(1, 1, 1));
+	setLorentzBoost(&cpu_objects[0], 0.9 * dir);
+
+	cpu_objects[object_count - 2].color = double3(1, 1, 1);
+	cpu_objects[object_count - 2].type = SPHERE;
+	cpu_objects[object_count - 2].light = true;
+	TRS(&cpu_objects[object_count - 2], p0 + offset + 10*dir, 0, double3(0, 1, 0), double3(0.1, 0.1, 0.1));
+	setLorentzBoost(&cpu_objects[object_count - 2], -0.9 * dir);
+
 	for (int i = 1; i < object_count - 2; i++) {
 		cpu_objects[i].color = double3(i%3==0 ? 1.0:0.0, i%3==1?1.0:0.0, i%3==2?1.0:0.0);
 		cpu_objects[i].type = SPHERE;
-		double c = magnitude(p0) + 1.0 * (i-1);
+		double c = magnitude(p0) + 2.0 * (i-1);
 		double a = b * cosC + sqrt(-b * b + c * c + b * b*cosC*cosC);
 		TRS(&cpu_objects[i], p0 + dir*a, 0, double3(0, 1, 0), double3(1, 1, 1));
 		std::cout << (p0 + dir * a).x << ", " << (double)(p0 + dir * a).y << ", " << (p0 + dir * a).z << std::endl;
@@ -898,14 +910,6 @@ void initScene(Object* cpu_objects) {
 	cpu_objects[object_count-1].textureWidth = textureValues[7];
 	cpu_objects[object_count-1].textureHeight = textureValues[8];
 	TRS(&cpu_objects[object_count-1], double3(0, -4, 20), 0.0001, double3(0, 1, 0), double3(40, 0.1, 40));
-
-	cpu_objects[object_count - 2].color = float3(0.9f, 0.8f, 0.7f);
-	cpu_objects[object_count - 2].type = SPHERE;
-	cpu_objects[object_count - 2].textureIndex = textureValues[6];
-	cpu_objects[object_count - 2].textureWidth = textureValues[7];
-	cpu_objects[object_count - 2].textureHeight = textureValues[8];
-	TRS(&cpu_objects[object_count - 2], double3(0, -4, 12), 0.001, double3(0, 1, 0), double3(20, 1, 1));
-	setLorentzBoost(&cpu_objects[object_count - 2], double3(0.8, 0, 0));
 
 
 	/*
