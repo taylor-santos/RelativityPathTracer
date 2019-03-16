@@ -860,7 +860,7 @@ void initScene(Object* cpu_objects) {
 	*/
 	queue.enqueueWriteBuffer(cl_objects, CL_TRUE, 0, object_count * sizeof(Object), cpu_objects);
 
-	white_point = double3(1, 1, 1);
+	white_point = double3(100, 100, 100);
 	ambient = 1;
 	/*
 	cpu_objects[0].textureIndex = textureValues[0];
@@ -871,7 +871,7 @@ void initScene(Object* cpu_objects) {
 
 
 
-	cl_double3 p0 = double3(2 * sqrt(2.0) - 10.0 + 3, -4, 2 * sqrt(2.0) + 5);
+	cl_double3 p0 = double3(2 * sqrt(2.0) - 20.0 + 3, -4, 2 * sqrt(2.0) + 2);
 	cl_double3 dir = double3(1, 0, 1);
 	dir = normalize(dir);
 
@@ -881,20 +881,22 @@ void initScene(Object* cpu_objects) {
 
 	
 
-	cl_double3 offset = double3(0, 2, 0);
+	cl_double3 offset = double3(0, 0.5, 3);
 	cpu_objects[0].color = double3(0.2, 0.2, 0.2);
 	cpu_objects[0].textureIndex = textureValues[0];
 	cpu_objects[0].textureWidth = textureValues[1];
 	cpu_objects[0].textureHeight = textureValues[2];
-	cpu_objects[0].type = SPHERE;
-	TRS(&cpu_objects[0], p0 + 10 * dir + offset, 0, double3(0, 1, 0), double3(1, 1, 1));
+	cpu_objects[0].type = MESH;
+	TRS(&cpu_objects[0], p0 + 10 * dir, 0, double3(0, 1, 0), double3(1, 1, 1));
 	setLorentzBoost(&cpu_objects[0], 0.9 * dir);
+	TRS(&cpu_objects[0], double3(0, -1, 12), 0, double3(0, 1, 0), double3(1, 1, 1));
+	setLorentzBoost(&cpu_objects[0], double3(0.99, 0, 0));
 
-	cpu_objects[object_count - 2].color = double3(1, 1, 1);
+	cpu_objects[object_count - 2].color = white_point;
 	cpu_objects[object_count - 2].type = SPHERE;
 	cpu_objects[object_count - 2].light = true;
-	TRS(&cpu_objects[object_count - 2], p0 + offset + 10*dir, 0, double3(0, 1, 0), double3(0.1, 0.1, 0.1));
-	setLorentzBoost(&cpu_objects[object_count - 2], -0.9 * dir);
+	TRS(&cpu_objects[object_count - 2], p0 + offset + 20*dir, 0, double3(0, 1, 0), double3(0.1, 0.1, 0.1));
+	setLorentzBoost(&cpu_objects[object_count - 2], 0.7 * dir);
 
 	for (int i = 1; i < object_count - 2; i++) {
 		cpu_objects[i].color = double3(i%3==0 ? 1.0:0.0, i%3==1?1.0:0.0, i%3==2?1.0:0.0);
@@ -909,7 +911,7 @@ void initScene(Object* cpu_objects) {
 	cpu_objects[object_count-1].textureIndex = textureValues[6];
 	cpu_objects[object_count-1].textureWidth = textureValues[7];
 	cpu_objects[object_count-1].textureHeight = textureValues[8];
-	TRS(&cpu_objects[object_count-1], double3(0, -4, 20), 0.0001, double3(0, 1, 0), double3(40, 0.1, 40));
+	TRS(&cpu_objects[object_count-1], double3(0, -4.1, 20), 0, double3(0, 1, 0), double3(40, 0.1, 40));
 
 
 	/*
@@ -1084,22 +1086,9 @@ void render(){
 		kernel.setArg(14, cl_vbo);
 	}
 	double s = ms / 1000.0;
-	//TRS(&cpu_objects[4], double3(-10, 0, 5), 3.1415926/2 * floor(ms / 2000.0), double3(0, 1, 0), double3(1, 1, 1));
-	/*
 
-	double x = ms / 400.0;
-	TRS(&cpu_objects[5], double3(1, 2*sin(x + 3.14159 / 2) - 3.5, 13), 0, double3(0, 1, 0), double3(0.5, 0.5 * (0.8 * sin(1.0 - pow(sin(x/2), 10))/sin(1) + 0.2), 0.5));
 
-	TRS(&cpu_objects[6], double3(4 * sin(ms / 2000.0), -0.5, 9), -3.1415926 / 2 * ms / 3000.0, double3(0, 1, 0), double3(10, 10, -10));
-
-	TRS(&cpu_objects[7], double3(-1, -1.5, 9 + 2 * sin(ms/1500.0)), ms/500.0, double3(0, 1, 0), double3(1, 1, 1));
-	*/
-
-	//TRS(&cpu_objects[object_count - 1], double3(0, -4 + sin(s/10), 20), 0.000, double3(0, 1, 0), double3(40, 0.1, 40));
-	//setLorentzBoost(&cpu_objects[1], double3(sin(s/10), 0, 0));
-	queue.enqueueWriteBuffer(cl_objects, CL_TRUE, 0, object_count * sizeof(Object), cpu_objects);
-
-	cl_double4 cameraPos = double4(currTime, 0, 0, 0);
+	cl_double4 cameraPos = double4(fmod(currTime, 30), 0, 0, 0);
 	for (int i = 0; i < object_count; i++) {
 		cpu_objects[i].stationaryCam = double4(
 			dot(cpu_objects[i].Lorentz[0], cameraPos),
@@ -1108,6 +1097,8 @@ void render(){
 			dot(cpu_objects[i].Lorentz[3], cameraPos)
 		);
 	}
+
+	queue.enqueueWriteBuffer(cl_objects, CL_TRUE, 0, object_count * sizeof(Object), cpu_objects);
 
 	kernel.setArg(0, cl_objects);
 	kernel.setArg(11, currTime);

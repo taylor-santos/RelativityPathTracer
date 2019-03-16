@@ -5,7 +5,7 @@
 
 __constant double EPSILON = 0.0000000001; /* required to compensate for limited float precision */
 __constant int MSAASAMPLES = 1;
-#define MAX_OCTREE_DEPTH 8;
+#define INTERVAL -1 // Set to 0 for spacelike, -1 for lightlike
 
 typedef struct Ray{
 	double3 origin;
@@ -390,7 +390,7 @@ bool intersect_scene(
 		newHit.dist = inf;
 		Ray4D newRay;
 		double4 newEvent0 = objects[i].stationaryCam;
-		double4 lightDir = (double4)(-1, normalize(ray->dir)); //Set t=0 for spacelike, set t=-1 for lightlike
+		double4 lightDir = (double4)(INTERVAL, normalize(ray->dir)); //Set t=0 for spacelike, set t=-1 for lightlike
 		lightDir = transformPoint4D(objects[i].Lorentz, lightDir);
 		//lightDir /= length(lightDir.yzw);
 		newRay.origin = newEvent0;
@@ -505,11 +505,73 @@ bool intersect_scene(
 	return false;
 }
 
+int sample_light(
+	global const Object* objects,
+	const int object_count,
+	global const double3 *vertices,
+	global const double3 *normals,
+	global const double2 *uvs,
+	global const unsigned int *triangles,
+	global const Octree *octrees,
+	global const int *octreeTris,
+	global const unsigned char *textures,
+	const Ray4D *ray,
+	const double time,
+	double lightDist,
+	const int lightIndex
+) {
+	/* initialise t to a very large number,
+	so t will be guaranteed to be smaller
+	when a hit with the scene occurs */
 
-/* the path tracing function */
-/* computes a path (starting from the camera) with a defined number of bounces, accumulates light/color at each bounce */
-/* each ray hitting a surface will be reflected in a random direction (by randomly sampling the hemisphere above the hitpoint) */
-/* small optimisation: diffuse ray directions are calculated using cosine weighted importance sampling */
+	float inf = 1e20;
+	bool didHit = false;
+	double4 event = (double)(0, 0, 0, 0);
+	/* check if the ray intersects each object in the scene */
+	for (int i = 0; i < object_count; i++) {
+		if (i != lightIndex) {
+
+			Hit newHit;
+			newHit.dist = inf;
+			Ray4D newRay;
+			double4 newEvent0 = transformPoint4D(objects[i].Lorentz, ray->origin);
+			double4 lightDir = (double4)(INTERVAL, normalize(ray->dir.yzw));
+			lightDir = transformPoint4D(objects[i].Lorentz, lightDir);
+			//lightDir /= length(lightDir.yzw);
+			newRay.origin = newEvent0;
+			newRay.dir = lightDir;
+
+			switch (objects[i].type) {
+			case SPHERE:
+				if (intersect_sphere(objects, i, &newRay, &newHit)) {
+					if (newHit.dist < lightDist) {
+						return i;
+					}
+				}
+				break;
+			case CUBE:
+				if (intersect_cube(objects, i, &newRay, &newHit)) {
+					if (newHit.dist < lightDist) {
+						return i;
+					}
+				}
+				break;
+				/*
+			case MESH:
+				if (intersect_octree(objects, i, vertices, normals, uvs, triangles, octrees, octreeTris, &newRay, &newHit)) {
+					if (newHit.dist < hit->dist) {
+						*hit = newHit;
+						hit->object = i;
+						didHit = true;
+					}
+				}
+				break;
+				*/
+			}
+		}
+	}
+	return -1;
+}
 
 double3 trace(
 	global const Object* objects,
@@ -529,33 +591,39 @@ double3 trace(
 	if (!intersect_scene(objects, object_count, vertices, normals, uvs, triangles, octrees, octreeTris, textures, camray, time, &hit))
 		return (double3)(0.15, 0.15, 0.25);
 
-	double3 hitpoint = camray->origin + camray->dir * hit.dist;
-	double3 normal = hit.normal;
-
-	double3 color = hit.color;// *(normal.y > 0 ? normal.y + 0.2 : 0.2);
+	double3 color = hit.color * ambient;// *(normal.y > 0 ? normal.y + 0.2 : 0.2);
 
 	if (objects[hit.object].light) {
 		color += hit.color;
 	}
-	/*
 	for (int i = 0; i < object_count; i++) {
 		if (i != hit.object && objects[i].light) {
-			double3 light_pos = transformPoint(objects[i].M, (double3)(0, 0, 0));
-			double3 light_dir = light_pos - hitpoint;
-
-			Ray lightRay;
-			lightRay.dir = normalize(light_dir);
-			lightRay.origin = hitpoint + hit.normal * 0.001;
-
-			Hit newHit;
-			if (dot(normal, light_dir) > 0) {
-				if (sample_light(objects, object_count, vertices, normals, uvs, triangles, octrees, octreeTris, textures, &lightRay, i, length(light_dir))) {
-					color += (dot(normal, lightRay.dir)/(1.0 + 0.1 * length(light_dir) + 0.01 * dot(light_dir, light_dir))) * hit.color * objects[i].color;
+			double4 cameraPos_ObjFrame = objects[hit.object].stationaryCam;
+			double4 rayDir = (double4)(INTERVAL, normalize(camray->dir));
+			double4 rayDir_ObjFrame = transformPoint4D(objects[hit.object].Lorentz, rayDir);
+			double4 hitPos_ObjFrame = cameraPos_ObjFrame + rayDir_ObjFrame * hit.dist;
+			hitPos_ObjFrame += (double4)(0, hit.normal * 0.001);
+			double4 hitPos = transformPoint4D(objects[hit.object].InvLorentz, hitPos_ObjFrame);
+			double4 hitPos_LightFrame = transformPoint4D(objects[i].Lorentz, hitPos);
+			double3 hitPos3_LightFrame = hitPos_LightFrame.yzw;
+			double3 lightPos3_LightFrame = (double3)(objects[i].M[0].w, objects[i].M[1].w, objects[i].M[2].w);
+			double3 lightDir3_LightFrame = lightPos3_LightFrame - hitPos3_LightFrame;
+			double4 lightDir_LightFrame = (double4)(INTERVAL * length(lightDir3_LightFrame), lightDir3_LightFrame);
+			double4 lightDir = transformPoint4D(objects[i].InvLorentz, lightDir_LightFrame);
+			double4 lightDir_ObjFrame = transformPoint4D(objects[hit.object].Lorentz, lightDir);
+			double3 lightDir3_ObjFrame = lightDir_ObjFrame.yzw;
+			double3 unitLightDir3 = normalize(lightDir3_ObjFrame);
+			if (dot(hit.normal, unitLightDir3) > 0) {
+				Ray4D newRay;
+				newRay.dir = (double4)(INTERVAL, normalize(lightDir.yzw));
+				newRay.origin = hitPos;
+				int shadowIndex = sample_light(objects, object_count, vertices, normals, uvs, triangles, octrees, octreeTris, textures, &newRay, time, length(lightDir.yzw), i);
+				if (shadowIndex == -1) {
+					color += dot(hit.normal, unitLightDir3) / (1.0 + 0.1 * length(lightDir3_ObjFrame) + 0.01*dot(lightDir3_ObjFrame, lightDir3_ObjFrame)) * hit.color * objects[i].color;
 				}
 			}
 		}
 	}
-	*/
 	return color;
 }
 
