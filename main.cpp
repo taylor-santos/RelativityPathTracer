@@ -332,6 +332,14 @@ cl_double3 operator-(const cl_double3 &v1, const cl_double3 &v2) {
 	);
 }
 
+cl_double3 operator-(const cl_double3 &v) {
+	return double3(
+		-v.x,
+		-v.y,
+		-v.z
+	);
+}
+
 cl_double3 operator*(const cl_double3 &v, const double &c) {
 	return double3(
 		v.x * c,
@@ -351,8 +359,8 @@ cl_double3 operator/(const cl_double3 &v, const double &c) {
 	);
 }
 
-double dot(const cl_double3 &a, const cl_double3 &b) {
-	return a.x * b.x + a.y * b.y + a.z * b.z;
+double dot(const cl_double4 &a, const cl_double4 &b) {
+	return a.x * b.x + a.y * b.y + a.z * b.z + a.w * b.w;
 }
 
 cl_double3 cross(const cl_double3 &a, const cl_double3 &b) {
@@ -822,21 +830,65 @@ void TRS(Object *object, cl_double3 translation, double angle, cl_double3 axis, 
 	calcInvM(object);
 }
 
-void setLorentzBoost(Object *object, cl_double3 v) {
+void Identity(cl_double4(&M)[4]) {
+	M[0] = double4(1, 0, 0, 0);
+	M[1] = double4(0, 1, 0, 0);
+	M[2] = double4(0, 0, 1, 0);
+	M[3] = double4(0, 0, 0, 1);
+}
+
+void Lorentz(cl_double4(&M)[4], cl_double3 v) {
 	double gamma = 1.0 / sqrt(1.0 - dot(v, v));
 	double vSqr = dot(v, v);
-	object->Lorentz[0]    = double4(gamma,        -v.x * gamma,                           -v.y * gamma,                           -v.z * gamma);
-	object->Lorentz[1]    = double4(-v.x * gamma, (gamma - 1.0) * v.x * v.x / vSqr + 1.0, (gamma - 1.0) * v.x * v.y / vSqr,       (gamma - 1.0) * v.x * v.z / vSqr);
-	object->Lorentz[2]    = double4(-v.y * gamma, (gamma - 1.0) * v.y * v.x / vSqr,       (gamma - 1.0) * v.y * v.y / vSqr + 1.0, (gamma - 1.0) * v.y * v.z / vSqr);
-	object->Lorentz[3]    = double4(-v.z * gamma, (gamma - 1.0) * v.z * v.x / vSqr,       (gamma - 1.0) * v.z * v.y / vSqr,       (gamma - 1.0) * v.z * v.z / vSqr + 1.0); 
-	
-	object->InvLorentz[0] = double4(gamma,        v.x * gamma,                            v.y * gamma,                            v.z * gamma);
-	object->InvLorentz[1] = object->Lorentz[1];
-	object->InvLorentz[1].x *= -1;
-	object->InvLorentz[2] = object->Lorentz[2];
-	object->InvLorentz[2].x *= -1;
-	object->InvLorentz[3] = object->Lorentz[3];
-	object->InvLorentz[3].x *= -1;
+	if (vSqr == 0) {
+		Identity(M);
+	}
+	else {
+		M[0] = double4(gamma, -v.x * gamma, -v.y * gamma, -v.z * gamma);
+		M[1] = double4(-v.x * gamma, (gamma - 1.0) * v.x * v.x / vSqr + 1.0, (gamma - 1.0) * v.x * v.y / vSqr, (gamma - 1.0) * v.x * v.z / vSqr);
+		M[2] = double4(-v.y * gamma, (gamma - 1.0) * v.y * v.x / vSqr, (gamma - 1.0) * v.y * v.y / vSqr + 1.0, (gamma - 1.0) * v.y * v.z / vSqr);
+		M[3] = double4(-v.z * gamma, (gamma - 1.0) * v.z * v.x / vSqr, (gamma - 1.0) * v.z * v.y / vSqr, (gamma - 1.0) * v.z * v.z / vSqr + 1.0);
+	}
+}
+
+
+void MatrixMultiplyLeft(cl_double4(&A)[4], cl_double4 const(&B)[4]) {
+	for (int i = 0; i < 4; i++) {
+		A[i] = double4(
+			dot(A[i], double4(B[0].x, B[1].x, B[2].x, B[3].x)),
+			dot(A[i], double4(B[0].y, B[1].y, B[2].y, B[3].y)),
+			dot(A[i], double4(B[0].z, B[1].z, B[2].z, B[3].z)),
+			dot(A[i], double4(B[0].w, B[1].w, B[2].w, B[3].w))
+		);
+	}
+}
+
+void MatrixMultiplyRight(cl_double4 const (&A)[4], cl_double4 (&B)[4]) {
+	cl_double4 out[4];
+	for (int i = 0; i < 4; i++) {
+		out[i] = double4(
+			dot(A[i], double4(B[0].x, B[1].x, B[2].x, B[3].x)),
+			dot(A[i], double4(B[0].y, B[1].y, B[2].y, B[3].y)),
+			dot(A[i], double4(B[0].z, B[1].z, B[2].z, B[3].z)),
+			dot(A[i], double4(B[0].w, B[1].w, B[2].w, B[3].w))
+		);
+	}
+	B[0] = out[0];
+	B[1] = out[1];
+	B[2] = out[2];
+	B[3] = out[3];
+}
+
+void setLorentzBoost(Object &object, cl_double3 v) {
+	Lorentz(object.Lorentz, v);
+	double gamma = 1.0 / sqrt(1.0 - dot(v, v));
+	object.InvLorentz[0] = double4(gamma, v.x * gamma, v.y * gamma, v.z * gamma);
+	object.InvLorentz[1] = object.Lorentz[1];
+	object.InvLorentz[1].x *= -1;
+	object.InvLorentz[2] = object.Lorentz[2];
+	object.InvLorentz[2].x *= -1;
+	object.InvLorentz[3] = object.Lorentz[3];
+	object.InvLorentz[3].x *= -1;
 };
 
 void initScene(Object* cpu_objects) {
@@ -881,39 +933,42 @@ void initScene(Object* cpu_objects) {
 
 	
 
-	cl_double3 offset = double3(0, 0.5, 3);
+	
 	cpu_objects[0].color = double3(0.2, 0.2, 0.2);
-	cpu_objects[0].textureIndex = textureValues[0];
+	//cpu_objects[0].textureIndex = textureValues[0];
 	cpu_objects[0].textureWidth = textureValues[1];
 	cpu_objects[0].textureHeight = textureValues[2];
 	cpu_objects[0].type = MESH;
 	TRS(&cpu_objects[0], p0 + 10 * dir, 0, double3(0, 1, 0), double3(1, 1, 1));
-	setLorentzBoost(&cpu_objects[0], 0.9 * dir);
 	TRS(&cpu_objects[0], double3(0, -1, 12), 0, double3(0, 1, 0), double3(1, 1, 1));
-	setLorentzBoost(&cpu_objects[0], double3(0.99, 0, 0));
+	
 
 	cpu_objects[object_count - 2].color = white_point;
-	cpu_objects[object_count - 2].type = SPHERE;
+	cpu_objects[object_count - 2].type = CUBE;
 	cpu_objects[object_count - 2].light = true;
-	TRS(&cpu_objects[object_count - 2], p0 + offset + 200*dir, 0, double3(0, 1, 0), double3(0.1, 0.1, 0.1));
-	setLorentzBoost(&cpu_objects[object_count - 2], 0.99 * dir);
+	cl_double3 offset = double3(1, 0.5, -1);
+	TRS(&cpu_objects[object_count - 2], double3(0, -3.5, 15), 0.001, double3(0, 1, 0), double3(0.5, 0.5, 0.5));
 
 	for (int i = 1; i < object_count - 2; i++) {
 		cpu_objects[i].color = double3(i%3==0 ? 1.0:0.0, i%3==1?1.0:0.0, i%3==2?1.0:0.0);
+		cpu_objects[i].type = CUBE;
+		TRS(&cpu_objects[i], double3(-0.75*(object_count - 4) + 1.5*(i-1) + 0.25, -4.5, 15), 0.001, double3(0, 1, 0), double3(0.5, 0.5, 0.5));
+		/*
 		cpu_objects[i].type = SPHERE;
 		double c = magnitude(p0) + 2.0 * (i-1);
 		double a = b * cosC + sqrt(-b * b + c * c + b * b*cosC*cosC);
 		TRS(&cpu_objects[i], p0 + dir*a, 0, double3(0, 1, 0), double3(1, 1, 1));
-		setLorentzBoost(&cpu_objects[i], -0.7 * dir);
 		std::cout << (p0 + dir * a).x << ", " << (double)(p0 + dir * a).y << ", " << (p0 + dir * a).z << std::endl;
+		*/
 	}
 	cpu_objects[object_count-1].color = float3(0.9f, 0.8f, 0.7f);
 	cpu_objects[object_count-1].type = CUBE;
-	cpu_objects[object_count-1].textureIndex = textureValues[6];
+	//cpu_objects[object_count-1].textureIndex = textureValues[6];
 	cpu_objects[object_count-1].textureWidth = textureValues[7];
 	cpu_objects[object_count-1].textureHeight = textureValues[8];
-	TRS(&cpu_objects[object_count-1], double3(0, -5.1, 20), 0, double3(0, 1, 0), double3(40, 0.1, 40));
-
+	TRS(&cpu_objects[object_count-1], double3(0, -5.1, 20), 0.01, double3(0, 1, 0), double3(40, 0.1, 40));
+	//offset = double3(1, -5.1, -1);
+	//TRS(&cpu_objects[object_count - 1], p0 + offset + 200 * dir, 0, double3(0, 1, 0), double3(40, 0.1, 40));
 
 	/*
 
@@ -1011,10 +1066,9 @@ void initCLKernel(){
 	kernel.setArg(8, cl_textures);
 	kernel.setArg(9, white_point);
 	kernel.setArg(10, ambient);
-	kernel.setArg(11, currTime);
-	kernel.setArg(12, window_width);
-	kernel.setArg(13, window_height);
-	kernel.setArg(14, cl_vbo);
+	kernel.setArg(11, window_width);
+	kernel.setArg(12, window_height);
+	kernel.setArg(13, cl_vbo);
 }
 
 void runKernel(){
@@ -1041,18 +1095,6 @@ void runKernel(){
 	//Release the VBOs so OpenGL can play with them
 	queue.enqueueReleaseGLObjects(&cl_vbos);
 	queue.finish();
-}
-
-
-// hash function to calculate new seed for each frame
-// see http://www.reedbeta.com/blog/2013/01/12/quick-and-easy-gpu-random-numbers-in-d3d11/
-unsigned int WangHash(unsigned int a) {
-	a = (a ^ 61) ^ (a >> 16);
-	a = a + (a << 3);
-	a = a ^ (a >> 4);
-	a = a * 0x27d4eb2d;
-	a = a ^ (a >> 15);
-	return a;
 }
 
 void render(){
@@ -1082,27 +1124,54 @@ void render(){
 		glBufferData(GL_ARRAY_BUFFER, size, 0, GL_DYNAMIC_DRAW);
 		cl_vbo = cl::BufferGL(context, CL_MEM_WRITE_ONLY, vbo);
 		cl_vbos[0] = cl_vbo;
-		kernel.setArg(12, window_width);
-		kernel.setArg(13, window_height);
-		kernel.setArg(14, cl_vbo);
+		kernel.setArg(11, window_width);
+		kernel.setArg(12, window_height);
+		kernel.setArg(13, cl_vbo);
 	}
 	double s = ms / 1000.0;
 
+	cl_double4 cameraLorentz[4];
+	cl_double4 cameraInvLorentz[4];
+	cl_double3 v = double3(0, 0, 0.6);
+	cl_double4 cameraPos = double4(currTime-30, 0, 0, 0);
+	Lorentz(cameraLorentz, v);
+	Lorentz(cameraInvLorentz, -v);
 
-	cl_double4 cameraPos = double4(fmod(currTime-10, 50), 0, 0, 0);
 	for (int i = 0; i < object_count; i++) {
+		Identity(cpu_objects[i].Lorentz);
+		Identity(cpu_objects[i].InvLorentz);
+	}
+
+	cl_double3 dir = double3(1, 0, 1);
+	dir = normalize(dir);
+	setLorentzBoost(cpu_objects[0], double3(0.99, 0, 0));
+	setLorentzBoost(cpu_objects[object_count - 2], double3(sqrt(3) / 2, 0, 0));
+
+	for (int i = 0; i < object_count; i++) {
+		MatrixMultiplyLeft(cpu_objects[i].Lorentz, cameraInvLorentz);
+		MatrixMultiplyRight(cameraLorentz, cpu_objects[i].InvLorentz);
 		cpu_objects[i].stationaryCam = double4(
 			dot(cpu_objects[i].Lorentz[0], cameraPos),
 			dot(cpu_objects[i].Lorentz[1], cameraPos),
 			dot(cpu_objects[i].Lorentz[2], cameraPos),
 			dot(cpu_objects[i].Lorentz[3], cameraPos)
 		);
+		/*
+		std::cout << "{{" << cpu_objects[i].Lorentz[0].x << "," << cpu_objects[i].Lorentz[0].y << "," << cpu_objects[i].Lorentz[0].z << "," << cpu_objects[i].Lorentz[0].w << "},{"
+			<< cpu_objects[i].Lorentz[1].x << "," << cpu_objects[i].Lorentz[1].y << "," << cpu_objects[i].Lorentz[1].z << "," << cpu_objects[i].Lorentz[1].w << "},{"
+			<< cpu_objects[i].Lorentz[2].x << "," << cpu_objects[i].Lorentz[2].y << "," << cpu_objects[i].Lorentz[2].z << "," << cpu_objects[i].Lorentz[2].w << "},{"
+			<< cpu_objects[i].Lorentz[3].x << "," << cpu_objects[i].Lorentz[3].y << "," << cpu_objects[i].Lorentz[3].z << "," << cpu_objects[i].Lorentz[3].w << "}}" << std::endl;
+		
+		std::cout << "{{" << cpu_objects[i].InvLorentz[0].x << "," << cpu_objects[i].InvLorentz[0].y << "," << cpu_objects[i].InvLorentz[0].z << "," << cpu_objects[i].InvLorentz[0].w << "},{"
+			<< cpu_objects[i].InvLorentz[1].x << "," << cpu_objects[i].InvLorentz[1].y << "," << cpu_objects[i].InvLorentz[1].z << "," << cpu_objects[i].InvLorentz[1].w << "},{"
+			<< cpu_objects[i].InvLorentz[2].x << "," << cpu_objects[i].InvLorentz[2].y << "," << cpu_objects[i].InvLorentz[2].z << "," << cpu_objects[i].InvLorentz[2].w << "},{"
+			<< cpu_objects[i].InvLorentz[3].x << "," << cpu_objects[i].InvLorentz[3].y << "," << cpu_objects[i].InvLorentz[3].z << "," << cpu_objects[i].InvLorentz[3].w << "}}" << std::endl;
+		*/
 	}
 
 	queue.enqueueWriteBuffer(cl_objects, CL_TRUE, 0, object_count * sizeof(Object), cpu_objects);
 
 	kernel.setArg(0, cl_objects);
-	kernel.setArg(11, currTime);
 
 	runKernel();
 
