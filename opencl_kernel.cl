@@ -5,7 +5,10 @@
 
 __constant double EPSILON = 0.0000000001; /* required to compensate for limited float precision */
 __constant int MSAASAMPLES = 1;
-#define INTERVAL -1 // Set to 0 for spacelike, -1 for lightlike
+
+#define SPACELIKE 0
+#define LIGHTLIKE -1
+#define INTERVAL SPACELIKE
 
 typedef struct Ray{
 	double3 origin;
@@ -598,6 +601,7 @@ double3 trace(
 	}
 	for (int i = 0; i < object_count; i++) {
 		if (i != hit.object && objects[i].light) {
+
 			double4 cameraPos_ObjFrame = objects[hit.object].stationaryCam;
 			double4 rayDir = (double4)(INTERVAL, normalize(camray->dir));
 			double4 rayDir_ObjFrame = transformPoint4D(objects[hit.object].Lorentz, rayDir);
@@ -605,14 +609,26 @@ double3 trace(
 			hitPos_ObjFrame += (double4)(0, hit.normal * 0.001);
 			double4 hitPos = transformPoint4D(objects[hit.object].InvLorentz, hitPos_ObjFrame);
 			double4 hitPos_LightFrame = transformPoint4D(objects[i].Lorentz, hitPos);
-			double3 hitPos3_LightFrame = hitPos_LightFrame.yzw;
-			double3 lightPos3_LightFrame = (double3)(objects[i].M[0].w, objects[i].M[1].w, objects[i].M[2].w);
-			double3 lightDir3_LightFrame = lightPos3_LightFrame - hitPos3_LightFrame;
-			double4 lightDir_LightFrame = (double4)(INTERVAL * length(lightDir3_LightFrame), lightDir3_LightFrame);
-			double4 lightDir = transformPoint4D(objects[i].InvLorentz, lightDir_LightFrame);
+			double4 lightDir;
+			if (INTERVAL) {
+				double3 hitPos3_LightFrame = hitPos_LightFrame.yzw;
+				double3 lightPos3_LightFrame = (double3)(objects[i].M[0].w, objects[i].M[1].w, objects[i].M[2].w);
+				double3 lightDir3_LightFrame = lightPos3_LightFrame - hitPos3_LightFrame;
+				double4 lightDir_LightFrame = (double4)(INTERVAL * length(lightDir3_LightFrame), lightDir3_LightFrame);
+				lightDir = transformPoint4D(objects[i].InvLorentz, lightDir_LightFrame);
+			}
+			else {
+				double4 hitPos_OffsetLightFrame = hitPos_LightFrame - (double4)(0, objects[i].M[0].w, objects[i].M[1].w, objects[i].M[2].w);
+				double4 norm = normalize(transformPoint4D(objects[i].InvLorentz, (double4)(1, 0, 0, 0)));
+				double4 lightPos_OffsetLightFrame = (double4)(dot(norm, hitPos_OffsetLightFrame) / norm.x, 0, 0, 0);
+				double4 lightPos_LightFrame = lightPos_OffsetLightFrame + (double4)(0, objects[i].M[0].w, objects[i].M[1].w, objects[i].M[2].w);
+				double4 lightPos = transformPoint4D(objects[i].InvLorentz, lightPos_LightFrame);
+				lightDir = lightPos - hitPos;
+			}
 			double4 lightDir_ObjFrame = transformPoint4D(objects[hit.object].Lorentz, lightDir);
 			double3 lightDir3_ObjFrame = lightDir_ObjFrame.yzw;
 			double3 unitLightDir3 = normalize(lightDir3_ObjFrame);
+
 			if (dot(hit.normal, unitLightDir3) > 0) {
 				Ray4D newRay;
 				newRay.dir = (double4)(INTERVAL, normalize(lightDir.yzw));

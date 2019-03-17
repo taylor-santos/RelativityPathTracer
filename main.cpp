@@ -895,8 +895,8 @@ void initScene(Object* cpu_objects) {
 	cpu_objects[object_count - 2].color = white_point;
 	cpu_objects[object_count - 2].type = SPHERE;
 	cpu_objects[object_count - 2].light = true;
-	TRS(&cpu_objects[object_count - 2], p0 + offset + 20*dir, 0, double3(0, 1, 0), double3(0.1, 0.1, 0.1));
-	setLorentzBoost(&cpu_objects[object_count - 2], 0.7 * dir);
+	TRS(&cpu_objects[object_count - 2], p0 + offset + 200*dir, 0, double3(0, 1, 0), double3(0.1, 0.1, 0.1));
+	setLorentzBoost(&cpu_objects[object_count - 2], 0.99 * dir);
 
 	for (int i = 1; i < object_count - 2; i++) {
 		cpu_objects[i].color = double3(i%3==0 ? 1.0:0.0, i%3==1?1.0:0.0, i%3==2?1.0:0.0);
@@ -904,6 +904,7 @@ void initScene(Object* cpu_objects) {
 		double c = magnitude(p0) + 2.0 * (i-1);
 		double a = b * cosC + sqrt(-b * b + c * c + b * b*cosC*cosC);
 		TRS(&cpu_objects[i], p0 + dir*a, 0, double3(0, 1, 0), double3(1, 1, 1));
+		setLorentzBoost(&cpu_objects[i], -0.7 * dir);
 		std::cout << (p0 + dir * a).x << ", " << (double)(p0 + dir * a).y << ", " << (p0 + dir * a).z << std::endl;
 	}
 	cpu_objects[object_count-1].color = float3(0.9f, 0.8f, 0.7f);
@@ -911,7 +912,7 @@ void initScene(Object* cpu_objects) {
 	cpu_objects[object_count-1].textureIndex = textureValues[6];
 	cpu_objects[object_count-1].textureWidth = textureValues[7];
 	cpu_objects[object_count-1].textureHeight = textureValues[8];
-	TRS(&cpu_objects[object_count-1], double3(0, -4.1, 20), 0, double3(0, 1, 0), double3(40, 0.1, 40));
+	TRS(&cpu_objects[object_count-1], double3(0, -5.1, 20), 0, double3(0, 1, 0), double3(40, 0.1, 40));
 
 
 	/*
@@ -1088,7 +1089,7 @@ void render(){
 	double s = ms / 1000.0;
 
 
-	cl_double4 cameraPos = double4(fmod(currTime, 30), 0, 0, 0);
+	cl_double4 cameraPos = double4(fmod(currTime-10, 50), 0, 0, 0);
 	for (int i = 0; i < object_count; i++) {
 		cpu_objects[i].stationaryCam = double4(
 			dot(cpu_objects[i].Lorentz[0], cameraPos),
