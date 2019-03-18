@@ -49,6 +49,9 @@ float ambient;
 cl_float4* cpu_output;
 cl_int err;
 unsigned int framenumber = 0;
+bool downKeys[7] = { false, false, false, false, false, false, false }; // w a s d q e space
+cl_float3 cameraVelocity = { {0,0,0} };
+cl_float4 cameraPos = { {0,0,0,0} };
 
 
 // padding with dummy variables are required for memory alignment
@@ -839,6 +842,11 @@ void Lorentz(cl_float4(&M)[4], cl_float3 v) {
 	}
 }
 
+cl_float3 AddVelocity(cl_float3 const& v1, cl_float3 const& v2) {
+	float gamma_v = 1.0f / sqrt(1 - dot(v1, v1));
+	float a_v = sqrt(1 - dot(v1, v1));
+	return 1.0f / (1.0f + dot(v2, v1))*(v1 + v2 + gamma_v / (1.0 + gamma_v)*cross(v1, cross(v1, v2)));
+}
 
 void MatrixMultiplyLeft(cl_float4(&A)[4], cl_float4 const(&B)[4]) {
 	for (int i = 0; i < 4; i++) {
@@ -968,6 +976,61 @@ void initScene(Object* cpu_objects) {
 	
 }
 
+void keyDown(unsigned char key, int x, int y){
+	switch (key) {
+	case 'w':
+		downKeys[0] = true;
+		break;
+	case 'a':
+		downKeys[1] = true;
+		break;
+	case 's':
+		downKeys[2] = true;
+		break;
+	case 'd':
+		downKeys[3] = true;
+		break;
+	case 'q':
+		downKeys[4] = true;
+		break;
+	case 'e':
+		downKeys[5] = true;
+		break;
+	case ' ':
+		downKeys[6] = true;
+		break;
+	}
+	std::cout << "Down: " << key << std::endl;
+}
+
+void keyUp(unsigned char key, int x, int y){
+	switch (key) {
+	case 'w':
+		downKeys[0] = false;
+		break;
+	case 'a':
+		downKeys[1] = false;
+		break;
+	case 's':
+		downKeys[2] = false;
+		break;
+	case 'd':
+		downKeys[3] = false;
+		break;
+	case 'q':
+		downKeys[4] = false;
+		break;
+	case 'e':
+		downKeys[5] = false;
+		break;
+	case ' ':
+		downKeys[6] = false;
+		break;
+	}
+	std::cout << "Up: " << key << std::endl;
+}
+
+
 void initCLKernel(){
 
 	// pick a rendermode
@@ -1027,7 +1090,7 @@ void render(){
 	int ms = std::chrono::duration_cast<std::chrono::milliseconds>(clock_end - clock_start).count();
 	currTime = ms / 1000.0f;
 	int frame_ms = std::chrono::duration_cast<std::chrono::milliseconds>(clock_end - clock_prev).count();
-	std::cout << 1000.0f / frame_ms << " fps\taverage: " << 1000.0f*framenumber / ms << std::endl;
+	//std::cout << 1000.0f / frame_ms << " fps\taverage: " << 1000.0f*framenumber / ms << std::endl;
 	clock_prev = std::chrono::high_resolution_clock::now();
 
 	int new_window_width = glutGet(GLUT_WINDOW_WIDTH),
@@ -1054,10 +1117,30 @@ void render(){
 
 	cl_float4 cameraLorentz[4];
 	cl_float4 cameraInvLorentz[4];
-	cl_float3 v = float3(0, 0, 0);
-	cl_float4 cameraPos = float4(currTime, 0, 0, 0);
-	Lorentz(cameraLorentz, v);
-	Lorentz(cameraInvLorentz, -v);
+
+	if (downKeys[6]) {
+		cameraVelocity = float3(0, 0, 0);
+	}
+	else {
+		cl_float3 dV = float3(0, 0, 0);
+		if (downKeys[0]) dV += float3(0, 0, 1);  // W
+		if (downKeys[1]) dV += float3(-1, 0, 0); // A
+		if (downKeys[2]) dV += float3(0, 0, -1); // S
+		if (downKeys[3]) dV += float3(1, 0, 0);  // D
+		if (downKeys[4]) dV += float3(0, -1, 0); // Q
+		if (downKeys[5]) dV += float3(0, 1, 0); // E
+
+		if (magnitude(dV) != 0) {
+			dV = tanh(frame_ms / 5000.0f) *  normalize(dV);
+			cameraVelocity = AddVelocity(cameraVelocity, dV);
+			std::cout << cameraVelocity.x << ", " << cameraVelocity.y << ", " << cameraVelocity.z << std::endl;
+		}
+		
+	}
+	cameraPos = float4(currTime, 0, 0, 0);
+	
+	Lorentz(cameraLorentz, cameraVelocity);
+	Lorentz(cameraInvLorentz, -cameraVelocity);
 
 	for (int i = 0; i < object_count; i++) {
 		Identity(cpu_objects[i].Lorentz);
@@ -1158,6 +1241,7 @@ void main(int argc, char** argv){
 	initCLKernel();
 
 	clock_start = std::chrono::high_resolution_clock::now();
+	clock_prev = std::chrono::high_resolution_clock::now();
 
 	// start rendering continuously
 	glutMainLoop();

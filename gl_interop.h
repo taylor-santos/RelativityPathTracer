@@ -13,6 +13,9 @@ int window_width, window_height;
 GLuint vbo;
 
 void render();
+void keyDown(unsigned char key, int x, int y);
+void keyUp(unsigned char key, int x, int y);
+
 
 void initGL(int argc, char** argv){
 	// init GLUT for OpenGL viewport
@@ -31,6 +34,9 @@ void initGL(int argc, char** argv){
 	// register GLUT callback function to display graphics:
 	glutDisplayFunc(render);
 
+	glutSetKeyRepeat(GLUT_KEY_REPEAT_OFF);
+	glutKeyboardFunc(keyDown);
+	glutKeyboardUpFunc(keyUp);
 	// initialise OpenGL extensions
 	glewInit();
 
