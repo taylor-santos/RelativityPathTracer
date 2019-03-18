@@ -235,7 +235,8 @@ void initOpenCL()
 
 	// Pick one platform
 	cl::Platform platform;
-	pickPlatform(platform, platforms);
+	//pickPlatform(platform, platforms);
+	platform = platforms[0];
 	std::cout << "\nUsing OpenCL platform: \t" << platform.getInfo<CL_PLATFORM_NAME>() << std::endl;
 
 	// Get available OpenCL devices on platform
