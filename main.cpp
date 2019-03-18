@@ -23,7 +23,7 @@
 const int object_count = 20;
 
 std::chrono::time_point<std::chrono::high_resolution_clock> clock_start, clock_end, clock_prev;
-double currTime = 0;
+float currTime = 0;
 
 // OpenCL objects
 cl::Device device;
@@ -42,8 +42,8 @@ cl::Buffer cl_octreeTris;
 cl::Buffer cl_textures;
 cl::BufferGL cl_vbo;
 std::vector<cl::Memory> cl_vbos;
-cl_double3 white_point;
-double ambient;
+cl_float3 white_point;
+float ambient;
 
 // image buffer (not needed with real-time viewport)
 cl_float4* cpu_output;
@@ -54,33 +54,33 @@ unsigned int framenumber = 0;
 // padding with dummy variables are required for memory alignment
 // float3 is considered as float4 by OpenCL
 // alignment can also be enforced by using __attribute__ ((aligned (16)));
-// see https://www.khronos.org/registry/cl/sdk/1.0/docs/man/xhtml/attributes-variables.html
+// see https://www.khronos.org/registry/cl/sdk/1.0f/docs/man/xhtml/attributes-variables.html
 
 enum objectType{SPHERE, CUBE, MESH};
 
 struct Object
 {
-	cl_double4 M[4];
-	cl_double4 InvM[4];
-	cl_double4 Lorentz[4] = { {{1,0,0,0}},{{0,1,0,0}},{{0,0,1,0}},{0,0,0,1} };
-	cl_double4 InvLorentz[4] = { {{1,0,0,0}},{{0,1,0,0}},{{0,0,1,0}},{0,0,0,1} };
-	cl_double4 stationaryCam;
-	cl_double3 color;
+	cl_float4 M[4];
+	cl_float4 InvM[4];
+	cl_float4 Lorentz[4] = { {{1,0,0,0}},{{0,1,0,0}},{{0,0,1,0}},{0,0,0,1} };
+	cl_float4 InvLorentz[4] = { {{1,0,0,0}},{{0,1,0,0}},{{0,0,1,0}},{0,0,0,1} };
+	cl_float4 stationaryCam;
+	cl_float3 color;
 	enum objectType type;
 	int meshIndex;
 	int textureIndex = -1;
 	int textureWidth;
 	int textureHeight;
 	bool light = false;
-	char dummy[4];
+	char dummy[8];
 };
 
 Object cpu_objects[object_count];
 
 struct Octree
 {
-	cl_double3 min;
-	cl_double3 max;
+	cl_float3 min;
+	cl_float3 max;
 	int trisIndex,
 		trisCount;
 	int children[8]  = { -1, -1, -1, -1, -1, -1, -1, -1 };
@@ -89,10 +89,10 @@ struct Octree
 
 struct Mesh
 {
-	std::vector<cl_double3> vertices;
+	std::vector<cl_float3> vertices;
 	std::vector<unsigned int> triangles;
-	std::vector<cl_double2> uvs;
-	std::vector<cl_double3> normals;
+	std::vector<cl_float2> uvs;
+	std::vector<cl_float3> normals;
 	std::vector<Octree> octree;
 	std::vector<int> octreeTris;
 	std::vector<int> meshIndices;
@@ -139,7 +139,7 @@ void json(Mesh const& mesh, const unsigned int octreeIndex, std::ostream &out, c
 		sep = ", ";
 	}
 	out << "]," << std::endl;
-	out << std::string(indent + 1, '\t') << "\"Mathematica\": \"Show[Graphics3D[{Opacity[0.5],Cuboid[{"
+	out << std::string(indent + 1, '\t') << "\"Mathematica\": \"Show[Graphics3D[{Opacity[0.5f],Cuboid[{"
 		<< mesh.octree[octreeIndex].min.x << "," << mesh.octree[octreeIndex].min.y << "," << mesh.octree[octreeIndex].min.z << "},{"
 		<< mesh.octree[octreeIndex].max.x << "," << mesh.octree[octreeIndex].max.y << "," << mesh.octree[octreeIndex].max.z
 		<< "}]}],Graphics3D[Triangle[{";
@@ -285,20 +285,12 @@ void initOpenCL()
 
 #define float3(x, y, z) {{x, y, z}}  // macro to replace ugly initializer braces
 #define float4(x, y, z, w) {{x, y, z, w}}
-#define double3(x, y, z) {{x, y, z}}
-#define double4(x, y, z, w) {{x, y, z, w}}
 
 float sqr_magnitude(const cl_float3 v) {
 	return v.x*v.x + v.y*v.y + v.z*v.z;
 }
-double sqr_magnitude(const cl_double3 v) {
-	return v.x*v.x + v.y*v.y + v.z*v.z;
-}
 
 float magnitude(const cl_float3 v) {
-	return sqrt(sqr_magnitude(v));
-}
-double magnitude(const cl_double3 v) {
 	return sqrt(sqr_magnitude(v));
 }
 
@@ -306,81 +298,77 @@ cl_float3 normalize(const cl_float3 v) {
 	float m = magnitude(v);
 	return float3(v.x / m, v.y / m, v.z / m);
 }
-cl_double3 normalize(const cl_double3 v) {
-	double m = magnitude(v);
-	return double3(v.x / m, v.y / m, v.z / m);
-}
 
-cl_double3 operator+(const cl_double3 &v1, const cl_double3 &v2) {
-	return double3(
+cl_float3 operator+(const cl_float3 &v1, const cl_float3 &v2) {
+	return float3(
 		v1.x + v2.x,
 		v1.y + v2.y,
 		v1.z + v2.z
 	);
 }
 
-cl_double3 &operator+=(cl_double3 &v1, const cl_double3 &v2) {
+cl_float3 &operator+=(cl_float3 &v1, const cl_float3 &v2) {
 	v1 = v1 + v2;
 	return v1;
 }
 
-cl_double3 operator-(const cl_double3 &v1, const cl_double3 &v2) {
-	return double3(
+cl_float3 operator-(const cl_float3 &v1, const cl_float3 &v2) {
+	return float3(
 		v1.x - v2.x,
 		v1.y - v2.y,
 		v1.z - v2.z
 	);
 }
 
-cl_double3 operator-(const cl_double3 &v) {
-	return double3(
+cl_float3 operator-(const cl_float3 &v) {
+	return float3(
 		-v.x,
 		-v.y,
 		-v.z
 	);
 }
 
-cl_double3 operator*(const cl_double3 &v, const double &c) {
-	return double3(
+cl_float3 operator*(const cl_float3 &v, const float &c) {
+	return float3(
 		v.x * c,
 		v.y * c,
 		v.z * c
 	);
 }
-cl_double3 operator*(const double &c, const cl_double3 &v) {
+cl_float3 operator*(const float &c, const cl_float3 &v) {
 	return v * c;
 }
 
-cl_double3 operator/(const cl_double3 &v, const double &c) {
-	return double3(
+cl_float3 operator/(const cl_float3 &v, const float &c) {
+	return float3(
 		v.x / c,
 		v.y / c,
 		v.z / c
 	);
 }
 
-double dot(const cl_double4 &a, const cl_double4 &b) {
+float dot(const cl_float4 &a, const cl_float4 &b) {
 	return a.x * b.x + a.y * b.y + a.z * b.z + a.w * b.w;
 }
 
-cl_double3 cross(const cl_double3 &a, const cl_double3 &b) {
-	return double3(
+cl_float3 cross(const cl_float3 &a, const cl_float3 &b) {
+	return float3(
 		a.y * b.z - a.z * b.y,
 		a.z * b.x - a.x * b.z,
 		a.x * b.y - a.y * b.x
 	);
 }
 
-cl_double3 elementwise_min(const cl_double3 &a, const cl_double3 &b) {
-	return double3(
+cl_float3 elementwise_min(const cl_float3 &a, const cl_float3 &b) {
+	return float3(
 		min(a.x, b.x),
 		min(a.y, b.y),
 		min(a.z, b.z)
 	);
 }
 
-cl_double3 elementwise_max(const cl_double3 &a, const cl_double3 &b) {
-	return double3(
+cl_float3 elementwise_max(const cl_float3 &a, const cl_float3 &b) {
+	return float3(
 		max(a.x, b.x),
 		max(a.y, b.y),
 		max(a.z, b.z)
@@ -388,133 +376,133 @@ cl_double3 elementwise_max(const cl_double3 &a, const cl_double3 &b) {
 }
 
 bool AABBTriangleIntersection(Mesh const& mesh, int octreeIndex, int triIndex) {
-	const cl_double3 A = mesh.vertices[mesh.triangles[9 * triIndex + 3 * 0]];
-	const cl_double3 B = mesh.vertices[mesh.triangles[9 * triIndex + 3 * 1]];
-	const cl_double3 C = mesh.vertices[mesh.triangles[9 * triIndex + 3 * 2]];
-	cl_double3 min = mesh.octree[octreeIndex].min;
-	cl_double3 max = mesh.octree[octreeIndex].max;
-	cl_double3 center = (min + max) / 2;
-	cl_double3 extents = (max - min) / 2;
+	const cl_float3 A = mesh.vertices[mesh.triangles[9 * triIndex + 3 * 0]];
+	const cl_float3 B = mesh.vertices[mesh.triangles[9 * triIndex + 3 * 1]];
+	const cl_float3 C = mesh.vertices[mesh.triangles[9 * triIndex + 3 * 2]];
+	cl_float3 min = mesh.octree[octreeIndex].min;
+	cl_float3 max = mesh.octree[octreeIndex].max;
+	cl_float3 center = (min + max) / 2;
+	cl_float3 extents = (max - min) / 2;
 
-	cl_double3 offsetA = A - center;
-	cl_double3 offsetB = B - center;
-	cl_double3 offsetC = C - center;
+	cl_float3 offsetA = A - center;
+	cl_float3 offsetB = B - center;
+	cl_float3 offsetC = C - center;
 
-	cl_double3 ba = offsetB - offsetA;
-	cl_double3 cb = offsetC - offsetB;
+	cl_float3 ba = offsetB - offsetA;
+	cl_float3 cb = offsetC - offsetB;
 
-	double x_ba_abs = abs(ba.x);
-	double y_ba_abs = abs(ba.y);
-	double z_ba_abs = abs(ba.z);
+	float x_ba_abs = abs(ba.x);
+	float y_ba_abs = abs(ba.y);
+	float z_ba_abs = abs(ba.z);
 	{
-		double min = ba.z * offsetA.y - ba.y * offsetA.z;
-		double max = ba.z * offsetC.y - ba.y * offsetC.z;
+		float min = ba.z * offsetA.y - ba.y * offsetA.z;
+		float max = ba.z * offsetC.y - ba.y * offsetC.z;
 		if (min > max) {
-			double temp = min;
+			float temp = min;
 			min = max;
 			max = temp;
 		}
-		double rad = z_ba_abs * extents.y + y_ba_abs * extents.z;
+		float rad = z_ba_abs * extents.y + y_ba_abs * extents.z;
 		if (min > rad || max < -rad) return false;
 	}
 	{
-		double min = -ba.z * offsetA.x + ba.x * offsetA.z;
-		double max = -ba.z * offsetC.x + ba.x * offsetC.z;
+		float min = -ba.z * offsetA.x + ba.x * offsetA.z;
+		float max = -ba.z * offsetC.x + ba.x * offsetC.z;
 		if (min > max) {
-			double temp = min;
+			float temp = min;
 			min = max;
 			max = temp;
 		}
-		double rad = z_ba_abs * extents.x + x_ba_abs * extents.z;
+		float rad = z_ba_abs * extents.x + x_ba_abs * extents.z;
 		if (min > rad || max < -rad) return false;
 	}
 	{
-		double min = ba.y * offsetB.x - ba.x * offsetB.y;
-		double max = ba.y * offsetC.x - ba.x * offsetC.y;
+		float min = ba.y * offsetB.x - ba.x * offsetB.y;
+		float max = ba.y * offsetC.x - ba.x * offsetC.y;
 		if (min > max) {
-			double temp = min;
+			float temp = min;
 			min = max;
 			max = temp;
 		}
-		double rad = y_ba_abs * extents.x + x_ba_abs * extents.y;
+		float rad = y_ba_abs * extents.x + x_ba_abs * extents.y;
 		if (min > rad || max < -rad) return false;
 	}
-	double x_cb_abs = abs(cb.x);
-	double y_cb_abs = abs(cb.y);
-	double z_cb_abs = abs(cb.z);
+	float x_cb_abs = abs(cb.x);
+	float y_cb_abs = abs(cb.y);
+	float z_cb_abs = abs(cb.z);
 	{
-		double min = cb.z * offsetA.y - cb.y * offsetA.z,
+		float min = cb.z * offsetA.y - cb.y * offsetA.z,
 			max = cb.z * offsetC.y - cb.y * offsetC.z;
 		if (min > max) {
-			double temp = min;
+			float temp = min;
 			min = max;
 			max = temp;
 		}
-		double rad = z_cb_abs * extents.y + y_cb_abs * extents.z;
+		float rad = z_cb_abs * extents.y + y_cb_abs * extents.z;
 		if (min > rad || max < -rad) return false;
 	}
 	{
-		double min = -cb.z * offsetA.x + cb.x * offsetA.z,
+		float min = -cb.z * offsetA.x + cb.x * offsetA.z,
 			max = -cb.z * offsetC.x + cb.x * offsetC.z;
 		if (min > max) {
-			double temp = min;
+			float temp = min;
 			min = max;
 			max = temp;
 		}
-		double rad = z_cb_abs * extents.x + x_cb_abs * extents.z;
+		float rad = z_cb_abs * extents.x + x_cb_abs * extents.z;
 		if (min > rad || max < -rad) return false;
 	}
 	{
-		double min = cb.y * offsetA.x - cb.x * offsetA.y,
+		float min = cb.y * offsetA.x - cb.x * offsetA.y,
 			max = cb.y * offsetB.x - cb.x * offsetB.y;
 		if (min > max) {
-			double temp = min;
+			float temp = min;
 			min = max;
 			max = temp;
 		}
-		double rad = y_cb_abs * extents.x + x_cb_abs * extents.y;
+		float rad = y_cb_abs * extents.x + x_cb_abs * extents.y;
 		if (min > rad || max < -rad) return false;
 	}
-	cl_double3 ac = offsetA - offsetC;
-	double x_ac_abs = abs(ac.x);
-	double y_ac_abs = abs(ac.y);
-	double z_ac_abs = abs(ac.z);
+	cl_float3 ac = offsetA - offsetC;
+	float x_ac_abs = abs(ac.x);
+	float y_ac_abs = abs(ac.y);
+	float z_ac_abs = abs(ac.z);
 	{
-		double min = ac.z * offsetA.y - ac.y * offsetA.z,
+		float min = ac.z * offsetA.y - ac.y * offsetA.z,
 			max = ac.z * offsetB.y - ac.y * offsetB.z;
 		if (min > max) {
-			double temp = min;
+			float temp = min;
 			min = max;
 			max = temp;
 		}
-		double rad = z_ac_abs * extents.y + y_ac_abs * extents.z;
+		float rad = z_ac_abs * extents.y + y_ac_abs * extents.z;
 		if (min > rad || max < -rad) return false;
 	}
 	{
-		double min = -ac.z * offsetA.x + ac.x * offsetA.z,
+		float min = -ac.z * offsetA.x + ac.x * offsetA.z,
 			max = -ac.z * offsetB.x + ac.x * offsetB.z;
 		if (min > max) {
-			double temp = min;
+			float temp = min;
 			min = max;
 			max = temp;
 		}
-		double rad = z_ac_abs * extents.x + x_ac_abs * extents.z;
+		float rad = z_ac_abs * extents.x + x_ac_abs * extents.z;
 		if (min > rad || max < -rad) return false;
 	}
 	{
-		double min = ac.y * offsetB.x - ac.x * offsetB.y,
+		float min = ac.y * offsetB.x - ac.x * offsetB.y,
 			max = ac.y * offsetC.x - ac.x * offsetC.y;
 		if (min > max) {
-			double temp = min;
+			float temp = min;
 			min = max;
 			max = temp;
 		}
-		double rad = y_ac_abs * extents.x + x_ac_abs * extents.y;
+		float rad = y_ac_abs * extents.x + x_ac_abs * extents.y;
 		if (min > rad || max < -rad) return false;
 	}
 	{
-		cl_double3 normal = cross(ba, cb);
-		cl_double3 min, max;
+		cl_float3 normal = cross(ba, cb);
+		cl_float3 min, max;
 		if (normal.x > 0) {
 			min.x = -extents.x - offsetA.x;
 			max.x = extents.x - offsetA.x;
@@ -543,8 +531,8 @@ bool AABBTriangleIntersection(Mesh const& mesh, int octreeIndex, int triIndex) {
 		if (dot(normal, max) < 0) return false;
 	}
 	{
-		cl_double3 min = elementwise_min(elementwise_min(offsetA, offsetB), offsetC);
-		cl_double3 max = elementwise_max(elementwise_max(offsetA, offsetB), offsetC);
+		cl_float3 min = elementwise_min(elementwise_min(offsetA, offsetB), offsetC);
+		cl_float3 max = elementwise_max(elementwise_max(offsetA, offsetB), offsetC);
 		if (min.x > extents.x || max.x < -extents.x) return false;
 		if (min.y > extents.y || max.y < -extents.y) return false;
 		if (min.z > extents.z || max.z < -extents.z) return false;
@@ -554,11 +542,11 @@ bool AABBTriangleIntersection(Mesh const& mesh, int octreeIndex, int triIndex) {
 
 void Subdivide(Mesh &mesh, int octreeIndex, int minTris, int depth) {
 	if (depth <= 0 || mesh.octree[octreeIndex].trisCount <= minTris) return;
-	cl_double3 extents = mesh.octree[octreeIndex].max - mesh.octree[octreeIndex].min;
-	cl_double3 half_extents = extents / 2;
-	cl_double3 ex = double3(half_extents.x, 0, 0);
-	cl_double3 ey = double3(0, half_extents.y, 0);
-	cl_double3 ez = double3(0, 0, half_extents.z);
+	cl_float3 extents = mesh.octree[octreeIndex].max - mesh.octree[octreeIndex].min;
+	cl_float3 half_extents = extents / 2;
+	cl_float3 ex = float3(half_extents.x, 0, 0);
+	cl_float3 ey = float3(0, half_extents.y, 0);
+	cl_float3 ez = float3(0, 0, half_extents.z);
 	int trisStart = mesh.octree[octreeIndex].trisIndex;
 	int trisCount = mesh.octree[octreeIndex].trisCount;
 	std::map<int, int> trisPerVertex;
@@ -638,7 +626,7 @@ void Mesh::GenerateOctree(int firstTriIndex) {
 	newOctree.min = vertices[triangles[firstTriIndex]];
 	newOctree.max = vertices[triangles[firstTriIndex]];
 	for (int i = firstTriIndex/3; i < triangles.size() / 3; i++) {
-		cl_double3 vert = vertices[triangles[3 * i]];
+		cl_float3 vert = vertices[triangles[3 * i]];
 		newOctree.min = elementwise_min(newOctree.min, vert);
 		newOctree.max = elementwise_max(newOctree.max, vert);
 	}
@@ -675,7 +663,7 @@ bool ReadOBJ(std::string path, Mesh &mesh) {
 		std::string prefix;
 		stream >> prefix;
 		if (prefix == "v") {
-			cl_double3 vert;
+			cl_float3 vert;
 			stream >> vert.x >> vert.y >> vert.z;
 			if (stream.fail()) {
 				std::cerr << "Error reading OBJ file \"" << path
@@ -685,7 +673,7 @@ bool ReadOBJ(std::string path, Mesh &mesh) {
 			mesh.vertices.push_back(vert);
 		}
 		else if (prefix == "vt") {
-			cl_double2 uv;
+			cl_float2 uv;
 			stream >> uv.x >> uv.y;
 			if (stream.fail()) {
 				std::cerr << "Error reading OBJ file \"" << path
@@ -695,7 +683,7 @@ bool ReadOBJ(std::string path, Mesh &mesh) {
 			mesh.uvs.push_back(uv);
 		}
 		else if (prefix == "vn") {
-			cl_double3 norm;
+			cl_float3 norm;
 			stream >> norm.x >> norm.y >> norm.z;
 			if (stream.fail()) {
 				std::cerr << "Error reading OBJ file \"" << path
@@ -731,14 +719,14 @@ bool ReadOBJ(std::string path, Mesh &mesh) {
 	for (const auto& kv : vertToTrisMap) {
 		int vertIndex = kv.first;
 		auto triList = kv.second;
-		cl_double3 N = double3(0, 0, 0);
+		cl_float3 N = float3(0, 0, 0);
 		for (int triIndex : triList) {
 			int AIndex = mesh.triangles[9 * triIndex + 3 * 0];
 			int BIndex = mesh.triangles[9 * triIndex + 3 * 1];
 			int CIndex = mesh.triangles[9 * triIndex + 3 * 2];
-			cl_double3 A = mesh.vertices[AIndex];
-			cl_double3 B = mesh.vertices[BIndex];
-			cl_double3 C = mesh.vertices[CIndex];
+			cl_float3 A = mesh.vertices[AIndex];
+			cl_float3 B = mesh.vertices[BIndex];
+			cl_float3 C = mesh.vertices[CIndex];
 			// Don't normalize: the cross product is proportional to the area of the triangle,
 			// and we want the normal contribution to be proportional to the area as well.
 			N += cross(B - A, C - A);
@@ -759,54 +747,54 @@ bool ReadOBJ(std::string path, Mesh &mesh) {
 }
 
 bool calcInvM(Object *object) {
-	double A2323 = object->M[2].z * object->M[3].w - object->M[2].w * object->M[3].z;
-	double A1323 = object->M[2].y * object->M[3].w - object->M[2].w * object->M[3].y;
-	double A1223 = object->M[2].y * object->M[3].z - object->M[2].z * object->M[3].y;
-	double A0323 = object->M[2].x * object->M[3].w - object->M[2].w * object->M[3].x;
-	double A0223 = object->M[2].x * object->M[3].z - object->M[2].z * object->M[3].x;
-	double A0123 = object->M[2].x * object->M[3].y - object->M[2].y * object->M[3].x;
-	double A2313 = object->M[1].z * object->M[3].w - object->M[1].w * object->M[3].z;
-	double A1313 = object->M[1].y * object->M[3].w - object->M[1].w * object->M[3].y;
-	double A1213 = object->M[1].y * object->M[3].z - object->M[1].z * object->M[3].y;
-	double A2312 = object->M[1].z * object->M[2].w - object->M[1].w * object->M[2].z;
-	double A1312 = object->M[1].y * object->M[2].w - object->M[1].w * object->M[2].y;
-	double A1212 = object->M[1].y * object->M[2].z - object->M[1].z * object->M[2].y;
-	double A0313 = object->M[1].x * object->M[3].w - object->M[1].w * object->M[3].x;
-	double A0213 = object->M[1].x * object->M[3].z - object->M[1].z * object->M[3].x;
-	double A0312 = object->M[1].x * object->M[2].w - object->M[1].w * object->M[2].x;
-	double A0212 = object->M[1].x * object->M[2].z - object->M[1].z * object->M[2].x;
-	double A0113 = object->M[1].x * object->M[3].y - object->M[1].y * object->M[3].x;
-	double A0112 = object->M[1].x * object->M[2].y - object->M[1].y * object->M[2].x;
+	float A2323 = object->M[2].z * object->M[3].w - object->M[2].w * object->M[3].z;
+	float A1323 = object->M[2].y * object->M[3].w - object->M[2].w * object->M[3].y;
+	float A1223 = object->M[2].y * object->M[3].z - object->M[2].z * object->M[3].y;
+	float A0323 = object->M[2].x * object->M[3].w - object->M[2].w * object->M[3].x;
+	float A0223 = object->M[2].x * object->M[3].z - object->M[2].z * object->M[3].x;
+	float A0123 = object->M[2].x * object->M[3].y - object->M[2].y * object->M[3].x;
+	float A2313 = object->M[1].z * object->M[3].w - object->M[1].w * object->M[3].z;
+	float A1313 = object->M[1].y * object->M[3].w - object->M[1].w * object->M[3].y;
+	float A1213 = object->M[1].y * object->M[3].z - object->M[1].z * object->M[3].y;
+	float A2312 = object->M[1].z * object->M[2].w - object->M[1].w * object->M[2].z;
+	float A1312 = object->M[1].y * object->M[2].w - object->M[1].w * object->M[2].y;
+	float A1212 = object->M[1].y * object->M[2].z - object->M[1].z * object->M[2].y;
+	float A0313 = object->M[1].x * object->M[3].w - object->M[1].w * object->M[3].x;
+	float A0213 = object->M[1].x * object->M[3].z - object->M[1].z * object->M[3].x;
+	float A0312 = object->M[1].x * object->M[2].w - object->M[1].w * object->M[2].x;
+	float A0212 = object->M[1].x * object->M[2].z - object->M[1].z * object->M[2].x;
+	float A0113 = object->M[1].x * object->M[3].y - object->M[1].y * object->M[3].x;
+	float A0112 = object->M[1].x * object->M[2].y - object->M[1].y * object->M[2].x;
 
-	double det =
+	float det =
 		object->M[0].x * (object->M[1].y * A2323 - object->M[1].z * A1323 + object->M[1].w * A1223)
 		- object->M[0].y * (object->M[1].x * A2323 - object->M[1].z * A0323 + object->M[1].w * A0223)
 		+ object->M[0].z * (object->M[1].x * A1323 - object->M[1].y * A0323 + object->M[1].w * A0123)
 		- object->M[0].w * (object->M[1].x * A1223 - object->M[1].y * A0223 + object->M[1].z * A0123);
-	if (det == 0.0) {
+	if (det == 0.0f) {
 		return false;
 	}
 	det = 1 / det;
 
-	object->InvM[0] = double4(
+	object->InvM[0] = float4(
 		det * (object->M[1].y * A2323 - object->M[1].z * A1323 + object->M[1].w * A1223),
 		det * -(object->M[0].y * A2323 - object->M[0].z * A1323 + object->M[0].w * A1223),
 		det * (object->M[0].y * A2313 - object->M[0].z * A1313 + object->M[0].w * A1213),
 		det * -(object->M[0].y * A2312 - object->M[0].z * A1312 + object->M[0].w * A1212)
 	);
-	object->InvM[1] = double4(
+	object->InvM[1] = float4(
 		det * -(object->M[1].x * A2323 - object->M[1].z * A0323 + object->M[1].w * A0223),
 		det * (object->M[0].x * A2323 - object->M[0].z * A0323 + object->M[0].w * A0223),
 		det * -(object->M[0].x * A2313 - object->M[0].z * A0313 + object->M[0].w * A0213),
 		det * (object->M[0].x * A2312 - object->M[0].z * A0312 + object->M[0].w * A0212)
 	);
-	object->InvM[2] = double4(
+	object->InvM[2] = float4(
 		det * (object->M[1].x * A1323 - object->M[1].y * A0323 + object->M[1].w * A0123),
 		det * -(object->M[0].x * A1323 - object->M[0].y * A0323 + object->M[0].w * A0123),
 		det * (object->M[0].x * A1313 - object->M[0].y * A0313 + object->M[0].w * A0113),
 		det * -(object->M[0].x * A1312 - object->M[0].y * A0312 + object->M[0].w * A0112)
 	);
-	object->InvM[3] = double4(
+	object->InvM[3] = float4(
 		det * -(object->M[1].x * A1223 - object->M[1].y * A0223 + object->M[1].z * A0123),
 		det * (object->M[0].x * A1223 - object->M[0].y * A0223 + object->M[0].z * A0123),
 		det * -(object->M[0].x * A1213 - object->M[0].y * A0213 + object->M[0].z * A0113),
@@ -815,62 +803,62 @@ bool calcInvM(Object *object) {
 	return true;
 }
 
-void TRS(Object *object, cl_double3 translation, double angle, cl_double3 axis, cl_double3 scale) {
-	cl_double3 R[3];
-	double c = cos(angle);
-	double s = sin(angle);
-	cl_double3 u = normalize(axis);
-	R[0] = double3(c + u.x*u.x*(1 - c), u.x*u.y*(1 - c) - u.z*s, u.x*u.z*(1 - c) + u.y*s);
-	R[1] = double3(u.y*u.x*(1 - c) + u.z*s, c + u.y*u.y*(1 - c), u.y*u.z*(1 - c) - u.x*s);
-	R[2] = double3(u.z*u.x*(1 - c) - u.y*s, u.z*u.y*(1 - c) + u.x*s, c + u.z*u.z*(1 - c));
-	object->M[0] = double4(R[0].x * scale.x, R[0].y * scale.y, R[0].z * scale.z, translation.x);
-	object->M[1] = double4(R[1].x * scale.x, R[1].y * scale.y, R[1].z * scale.z, translation.y);
-	object->M[2] = double4(R[2].x * scale.x, R[2].y * scale.y, R[2].z * scale.z, translation.z);
-	object->M[3] = double4(0, 0, 0, 1);
+void TRS(Object *object, cl_float3 translation, float angle, cl_float3 axis, cl_float3 scale) {
+	cl_float3 R[3];
+	float c = cos(angle);
+	float s = sin(angle);
+	cl_float3 u = normalize(axis);
+	R[0] = float3(c + u.x*u.x*(1 - c), u.x*u.y*(1 - c) - u.z*s, u.x*u.z*(1 - c) + u.y*s);
+	R[1] = float3(u.y*u.x*(1 - c) + u.z*s, c + u.y*u.y*(1 - c), u.y*u.z*(1 - c) - u.x*s);
+	R[2] = float3(u.z*u.x*(1 - c) - u.y*s, u.z*u.y*(1 - c) + u.x*s, c + u.z*u.z*(1 - c));
+	object->M[0] = float4(R[0].x * scale.x, R[0].y * scale.y, R[0].z * scale.z, translation.x);
+	object->M[1] = float4(R[1].x * scale.x, R[1].y * scale.y, R[1].z * scale.z, translation.y);
+	object->M[2] = float4(R[2].x * scale.x, R[2].y * scale.y, R[2].z * scale.z, translation.z);
+	object->M[3] = float4(0, 0, 0, 1);
 	calcInvM(object);
 }
 
-void Identity(cl_double4(&M)[4]) {
-	M[0] = double4(1, 0, 0, 0);
-	M[1] = double4(0, 1, 0, 0);
-	M[2] = double4(0, 0, 1, 0);
-	M[3] = double4(0, 0, 0, 1);
+void Identity(cl_float4(&M)[4]) {
+	M[0] = float4(1, 0, 0, 0);
+	M[1] = float4(0, 1, 0, 0);
+	M[2] = float4(0, 0, 1, 0);
+	M[3] = float4(0, 0, 0, 1);
 }
 
-void Lorentz(cl_double4(&M)[4], cl_double3 v) {
-	double gamma = 1.0 / sqrt(1.0 - dot(v, v));
-	double vSqr = dot(v, v);
+void Lorentz(cl_float4(&M)[4], cl_float3 v) {
+	float gamma = 1.0f / sqrt(1.0f - dot(v, v));
+	float vSqr = dot(v, v);
 	if (vSqr == 0) {
 		Identity(M);
 	}
 	else {
-		M[0] = double4(gamma, -v.x * gamma, -v.y * gamma, -v.z * gamma);
-		M[1] = double4(-v.x * gamma, (gamma - 1.0) * v.x * v.x / vSqr + 1.0, (gamma - 1.0) * v.x * v.y / vSqr, (gamma - 1.0) * v.x * v.z / vSqr);
-		M[2] = double4(-v.y * gamma, (gamma - 1.0) * v.y * v.x / vSqr, (gamma - 1.0) * v.y * v.y / vSqr + 1.0, (gamma - 1.0) * v.y * v.z / vSqr);
-		M[3] = double4(-v.z * gamma, (gamma - 1.0) * v.z * v.x / vSqr, (gamma - 1.0) * v.z * v.y / vSqr, (gamma - 1.0) * v.z * v.z / vSqr + 1.0);
+		M[0] = float4(gamma, -v.x * gamma, -v.y * gamma, -v.z * gamma);
+		M[1] = float4(-v.x * gamma, (gamma - 1.0f) * v.x * v.x / vSqr + 1.0f, (gamma - 1.0f) * v.x * v.y / vSqr, (gamma - 1.0f) * v.x * v.z / vSqr);
+		M[2] = float4(-v.y * gamma, (gamma - 1.0f) * v.y * v.x / vSqr, (gamma - 1.0f) * v.y * v.y / vSqr + 1.0f, (gamma - 1.0f) * v.y * v.z / vSqr);
+		M[3] = float4(-v.z * gamma, (gamma - 1.0f) * v.z * v.x / vSqr, (gamma - 1.0f) * v.z * v.y / vSqr, (gamma - 1.0f) * v.z * v.z / vSqr + 1.0f);
 	}
 }
 
 
-void MatrixMultiplyLeft(cl_double4(&A)[4], cl_double4 const(&B)[4]) {
+void MatrixMultiplyLeft(cl_float4(&A)[4], cl_float4 const(&B)[4]) {
 	for (int i = 0; i < 4; i++) {
-		A[i] = double4(
-			dot(A[i], double4(B[0].x, B[1].x, B[2].x, B[3].x)),
-			dot(A[i], double4(B[0].y, B[1].y, B[2].y, B[3].y)),
-			dot(A[i], double4(B[0].z, B[1].z, B[2].z, B[3].z)),
-			dot(A[i], double4(B[0].w, B[1].w, B[2].w, B[3].w))
+		A[i] = float4(
+			dot(A[i], float4(B[0].x, B[1].x, B[2].x, B[3].x)),
+			dot(A[i], float4(B[0].y, B[1].y, B[2].y, B[3].y)),
+			dot(A[i], float4(B[0].z, B[1].z, B[2].z, B[3].z)),
+			dot(A[i], float4(B[0].w, B[1].w, B[2].w, B[3].w))
 		);
 	}
 }
 
-void MatrixMultiplyRight(cl_double4 const (&A)[4], cl_double4 (&B)[4]) {
-	cl_double4 out[4];
+void MatrixMultiplyRight(cl_float4 const (&A)[4], cl_float4 (&B)[4]) {
+	cl_float4 out[4];
 	for (int i = 0; i < 4; i++) {
-		out[i] = double4(
-			dot(A[i], double4(B[0].x, B[1].x, B[2].x, B[3].x)),
-			dot(A[i], double4(B[0].y, B[1].y, B[2].y, B[3].y)),
-			dot(A[i], double4(B[0].z, B[1].z, B[2].z, B[3].z)),
-			dot(A[i], double4(B[0].w, B[1].w, B[2].w, B[3].w))
+		out[i] = float4(
+			dot(A[i], float4(B[0].x, B[1].x, B[2].x, B[3].x)),
+			dot(A[i], float4(B[0].y, B[1].y, B[2].y, B[3].y)),
+			dot(A[i], float4(B[0].z, B[1].z, B[2].z, B[3].z)),
+			dot(A[i], float4(B[0].w, B[1].w, B[2].w, B[3].w))
 		);
 	}
 	B[0] = out[0];
@@ -879,10 +867,10 @@ void MatrixMultiplyRight(cl_double4 const (&A)[4], cl_double4 (&B)[4]) {
 	B[3] = out[3];
 }
 
-void setLorentzBoost(Object &object, cl_double3 v) {
+void setLorentzBoost(Object &object, cl_float3 v) {
 	Lorentz(object.Lorentz, v);
-	double gamma = 1.0 / sqrt(1.0 - dot(v, v));
-	object.InvLorentz[0] = double4(gamma, v.x * gamma, v.y * gamma, v.z * gamma);
+	float gamma = 1.0f / sqrt(1.0f - dot(v, v));
+	object.InvLorentz[0] = float4(gamma, v.x * gamma, v.y * gamma, v.z * gamma);
 	object.InvLorentz[1] = object.Lorentz[1];
 	object.InvLorentz[1].x *= -1;
 	object.InvLorentz[2] = object.Lorentz[2];
@@ -911,7 +899,7 @@ void initScene(Object* cpu_objects) {
 	}
 	queue.enqueueWriteBuffer(cl_objects, CL_TRUE, 0, object_count * sizeof(Object), cpu_objects);
 
-	white_point = double3(100, 100, 100);
+	white_point = float3(100, 100, 100);
 	ambient = 1;
 	/*
 	cpu_objects[0].textureIndex = textureValues[0];
@@ -922,61 +910,61 @@ void initScene(Object* cpu_objects) {
 
 
 
-	cl_double3 p0 = double3(2 * sqrt(2.0) - 20.0 + 3, -4, 2 * sqrt(2.0) + 2);
-	cl_double3 dir = double3(1, 0, 1);
+	cl_float3 p0 = float3(2 * sqrt(2.0f) - 20.0f + 3, -4, 2 * sqrt(2.0f) + 2);
+	cl_float3 dir = float3(1, 0, 1);
 	dir = normalize(dir);
 
-	double cosC = dot(-1 * dir, normalize(p0));
+	float cosC = dot(-1 * dir, normalize(p0));
 	std::cout << cosC << std::endl;
-	double b = magnitude(p0);
+	float b = magnitude(p0);
 
 	
 
 	
-	cpu_objects[0].color = double3(0.2, 0.2, 0.2);
+	cpu_objects[0].color = float3(0.2f, 0.2f, 0.2f);
 	cpu_objects[0].textureIndex = textureValues[3];
 	cpu_objects[0].textureWidth = textureValues[4];
 	cpu_objects[0].textureHeight = textureValues[5];
 	cpu_objects[0].meshIndex = theMesh.meshIndices[0];
 	cpu_objects[0].type = MESH;
-	TRS(&cpu_objects[0], double3(0, -4, 17), 0, double3(0, 1, 0), double3(20, 20, 20));
+	TRS(&cpu_objects[0], float3(0, -4, 18), 0, float3(0, 1, 0), float3(20, 20, -20));
 	
 
 	
 
 	for (int i = 1; i < object_count - 4; i++) {
-		cpu_objects[i].color = double3(i%3==0 ? 1.0:0.0, i%3==1?1.0:0.0, i%3==2?1.0:0.0);
+		cpu_objects[i].color = float3(i%3==0 ? 1.0f:0.0f, i%3==1?1.0f:0.0f, i%3==2?1.0f:0.0f);
 		cpu_objects[i].type = CUBE;
-		TRS(&cpu_objects[i], double3(-0.75*(object_count - 4) + 1.5*(i-1) + 0.25, -4.5, 15), 0.001, double3(0, 1, 0), double3(0.5, 0.5, 0.5));
+		TRS(&cpu_objects[i], float3(-0.75f*(object_count - 4) + 1.5f*(i-1) + 0.25f, -4.5f, 15), 0.001f, float3(0, 1, 0), float3(0.5f, 0.5f, 0.5f));
 		/*
 		cpu_objects[i].type = SPHERE;
-		double c = magnitude(p0) + 2.0 * (i-1);
-		double a = b * cosC + sqrt(-b * b + c * c + b * b*cosC*cosC);
-		TRS(&cpu_objects[i], p0 + dir*a, 0, double3(0, 1, 0), double3(1, 1, 1));
-		std::cout << (p0 + dir * a).x << ", " << (double)(p0 + dir * a).y << ", " << (p0 + dir * a).z << std::endl;
+		float c = magnitude(p0) + 2.0f * (i-1);
+		float a = b * cosC + sqrt(-b * b + c * c + b * b*cosC*cosC);
+		TRS(&cpu_objects[i], p0 + dir*a, 0, float3(0, 1, 0), float3(1, 1, 1));
+		std::cout << (p0 + dir * a).x << ", " << (float)(p0 + dir * a).y << ", " << (p0 + dir * a).z << std::endl;
 		*/
 	}
 
-	cpu_objects[object_count - 4].color = double3(1, 1, 1);
-	TRS(&cpu_objects[object_count - 4], double3(-3.3, -2, 19), 0, double3(0, 1, 0), double3(10, 10, 1));
+	cpu_objects[object_count - 4].color = float3(1, 1, 1);
+	TRS(&cpu_objects[object_count - 4], float3(0, -2, 21), 0, float3(0, 1, 0), float3(10, 10, 1));
 	cpu_objects[object_count - 4].type = CUBE;
 
-	cpu_objects[object_count - 3].color = double3(1, 1, 1);
-	TRS(&cpu_objects[object_count - 3], double3(2.5, -2, 16), 0, double3(0, 1, 0), double3(1, 1, 1));
+	cpu_objects[object_count - 3].color = float3(1, 1, 1);
+	TRS(&cpu_objects[object_count - 3], float3(0, 3, 16), 0, float3(0, 1, 0), float3(10, 1, 10));
 	cpu_objects[object_count - 3].type = CUBE;
 
 	cpu_objects[object_count - 2].color = white_point;
 	cpu_objects[object_count - 2].type = CUBE;
 	cpu_objects[object_count - 2].light = true;
-	cl_double3 offset = double3(1, 0.5, -1);
-	TRS(&cpu_objects[object_count - 2], double3(0, -3.5, 16), 0.001, double3(0, 1, 0), double3(0.5, 0.5, 0.5));
+	cl_float3 offset = float3(1, 0.5f, -1);
+	TRS(&cpu_objects[object_count - 2], float3(0, -3.5f, 16), 0.001f, float3(0, 1, 0), float3(0.5f, 0.5f, 0.5f));
 
 	cpu_objects[object_count-1].color = float3(0.9f, 0.8f, 0.7f);
 	cpu_objects[object_count-1].type = CUBE;
 	//cpu_objects[object_count-1].textureIndex = textureValues[6];
 	cpu_objects[object_count-1].textureWidth = textureValues[7];
 	cpu_objects[object_count-1].textureHeight = textureValues[8];
-	TRS(&cpu_objects[object_count-1], double3(0, -5.1, 20), 0.01, double3(0, 1, 0), double3(40, 0.1, 40));
+	TRS(&cpu_objects[object_count-1], float3(0, -5.1f, 20), 0.01f, float3(0, 1, 0), float3(40, 0.1f, 40));
 	
 }
 
@@ -1037,9 +1025,9 @@ void render(){
 
 	clock_end = std::chrono::high_resolution_clock::now();
 	int ms = std::chrono::duration_cast<std::chrono::milliseconds>(clock_end - clock_start).count();
-	currTime = ms / 1000.0;
+	currTime = ms / 1000.0f;
 	int frame_ms = std::chrono::duration_cast<std::chrono::milliseconds>(clock_end - clock_prev).count();
-	std::cout << 1000.0 / frame_ms << " fps\taverage: " << 1000.0*framenumber / ms << std::endl;
+	std::cout << 1000.0f / frame_ms << " fps\taverage: " << 1000.0f*framenumber / ms << std::endl;
 	clock_prev = std::chrono::high_resolution_clock::now();
 
 	int new_window_width = glutGet(GLUT_WINDOW_WIDTH),
@@ -1048,10 +1036,10 @@ void render(){
 		window_width = new_window_width;
 		window_height = new_window_height;
 
-		glClearColor(0.0, 0.0, 0.0, 1.0);
+		glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
 		glMatrixMode(GL_PROJECTION);
 		glLoadIdentity();
-		gluOrtho2D(0.0, window_width, 0.0, window_height);
+		gluOrtho2D(0.0f, window_width, 0.0f, window_height);
 
 		glBindBuffer(GL_ARRAY_BUFFER, vbo);
 		unsigned int size = window_width * window_height * sizeof(cl_float3);
@@ -1062,12 +1050,12 @@ void render(){
 		kernel.setArg(12, window_height);
 		kernel.setArg(13, cl_vbo);
 	}
-	double s = ms / 1000.0;
+	float s = ms / 1000.0f;
 
-	cl_double4 cameraLorentz[4];
-	cl_double4 cameraInvLorentz[4];
-	cl_double3 v = double3(0, 0, 0);
-	cl_double4 cameraPos = double4(currTime, 0, 0, 0);
+	cl_float4 cameraLorentz[4];
+	cl_float4 cameraInvLorentz[4];
+	cl_float3 v = float3(0, 0, 0);
+	cl_float4 cameraPos = float4(currTime, 0, 0, 0);
 	Lorentz(cameraLorentz, v);
 	Lorentz(cameraInvLorentz, -v);
 
@@ -1076,14 +1064,14 @@ void render(){
 		Identity(cpu_objects[i].InvLorentz);
 	}
 
-	cl_double3 dir = double3(1, 0, 1);
+	cl_float3 dir = float3(1, 0, 1);
 	dir = normalize(dir);
-	setLorentzBoost(cpu_objects[object_count - 2], double3(sqrt(3) / 2, 0, 0));
+	setLorentzBoost(cpu_objects[object_count - 2], float3((float)sqrt(3) / 2, 0, 0));
 
 	for (int i = 0; i < object_count; i++) {
 		MatrixMultiplyLeft(cpu_objects[i].Lorentz, cameraInvLorentz);
 		MatrixMultiplyRight(cameraLorentz, cpu_objects[i].InvLorentz);
-		cpu_objects[i].stationaryCam = double4(
+		cpu_objects[i].stationaryCam = float4(
 			dot(cpu_objects[i].Lorentz[0], cameraPos),
 			dot(cpu_objects[i].Lorentz[1], cameraPos),
 			dot(cpu_objects[i].Lorentz[2], cameraPos),
@@ -1102,7 +1090,7 @@ void render(){
 		*/
 	}
 
-	//TRS(&cpu_objects[0], double3(0, -4 + sin(s)*2, 19), 0, double3(0, 1, 0), double3(20, 20, 20));
+	//TRS(&cpu_objects[0], float3(0, -4 + sin(s)*2, 19), 0, float3(0, 1, 0), float3(20, 20, 20));
 	queue.enqueueWriteBuffer(cl_objects, CL_TRUE, 0, object_count * sizeof(Object), cpu_objects);
 
 	kernel.setArg(0, cl_objects);
@@ -1141,14 +1129,14 @@ void main(int argc, char** argv){
 	cl_objects = cl::Buffer(context, CL_MEM_READ_ONLY, object_count * sizeof(Object));
 	queue.enqueueWriteBuffer(cl_objects, CL_TRUE, 0, object_count * sizeof(Object), cpu_objects);
 
-	cl_vertices = cl::Buffer(context, CL_MEM_READ_ONLY, theMesh.vertices.size() * sizeof(cl_double3));
-	queue.enqueueWriteBuffer(cl_vertices, CL_TRUE, 0, theMesh.vertices.size() * sizeof(cl_double3), theMesh.vertices.size() > 0 ? &theMesh.vertices[0] : NULL);
+	cl_vertices = cl::Buffer(context, CL_MEM_READ_ONLY, theMesh.vertices.size() * sizeof(cl_float3));
+	queue.enqueueWriteBuffer(cl_vertices, CL_TRUE, 0, theMesh.vertices.size() * sizeof(cl_float3), theMesh.vertices.size() > 0 ? &theMesh.vertices[0] : NULL);
 
-	cl_normals = cl::Buffer(context, CL_MEM_READ_ONLY, theMesh.normals.size() * sizeof(cl_double3));
-	queue.enqueueWriteBuffer(cl_normals, CL_TRUE, 0, theMesh.normals.size() * sizeof(cl_double3), theMesh.normals.size() > 0 ? &theMesh.normals[0] : NULL);
+	cl_normals = cl::Buffer(context, CL_MEM_READ_ONLY, theMesh.normals.size() * sizeof(cl_float3));
+	queue.enqueueWriteBuffer(cl_normals, CL_TRUE, 0, theMesh.normals.size() * sizeof(cl_float3), theMesh.normals.size() > 0 ? &theMesh.normals[0] : NULL);
 	
-	cl_uvs = cl::Buffer(context, CL_MEM_READ_ONLY, theMesh.uvs.size() * sizeof(cl_double2));
-	queue.enqueueWriteBuffer(cl_uvs, CL_TRUE, 0, theMesh.uvs.size() * sizeof(cl_double2), theMesh.uvs.size() > 0 ? &theMesh.uvs[0] : NULL);
+	cl_uvs = cl::Buffer(context, CL_MEM_READ_ONLY, theMesh.uvs.size() * sizeof(cl_float2));
+	queue.enqueueWriteBuffer(cl_uvs, CL_TRUE, 0, theMesh.uvs.size() * sizeof(cl_float2), theMesh.uvs.size() > 0 ? &theMesh.uvs[0] : NULL);
 
 	cl_triangles = cl::Buffer(context, CL_MEM_READ_ONLY, theMesh.triangles.size() * sizeof(unsigned int));
 	queue.enqueueWriteBuffer(cl_triangles, CL_TRUE, 0, theMesh.triangles.size() * sizeof(unsigned int), theMesh.triangles.size() > 0 ? &theMesh.triangles[0] : NULL);
