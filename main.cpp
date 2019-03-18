@@ -11,6 +11,7 @@
 #include <chrono>
 #include <map>
 #include <math.h>
+#include <thread>
 
 #include "gl_interop.h"
 #define cimg_use_jpeg
@@ -19,8 +20,6 @@
 // TODO
 // cleanup()
 // check for cl-gl interop
-
-const int object_count = 20;
 
 std::chrono::time_point<std::chrono::high_resolution_clock> clock_start, clock_end, clock_prev;
 float currTime = 0;
@@ -78,7 +77,7 @@ struct Object
 	char dummy[8];
 };
 
-Object cpu_objects[object_count];
+std::vector<Object> cpu_objects;
 
 struct Octree
 {
@@ -749,64 +748,64 @@ bool ReadOBJ(std::string path, Mesh &mesh) {
 	return true;
 }
 
-bool calcInvM(Object *object) {
-	float A2323 = object->M[2].z * object->M[3].w - object->M[2].w * object->M[3].z;
-	float A1323 = object->M[2].y * object->M[3].w - object->M[2].w * object->M[3].y;
-	float A1223 = object->M[2].y * object->M[3].z - object->M[2].z * object->M[3].y;
-	float A0323 = object->M[2].x * object->M[3].w - object->M[2].w * object->M[3].x;
-	float A0223 = object->M[2].x * object->M[3].z - object->M[2].z * object->M[3].x;
-	float A0123 = object->M[2].x * object->M[3].y - object->M[2].y * object->M[3].x;
-	float A2313 = object->M[1].z * object->M[3].w - object->M[1].w * object->M[3].z;
-	float A1313 = object->M[1].y * object->M[3].w - object->M[1].w * object->M[3].y;
-	float A1213 = object->M[1].y * object->M[3].z - object->M[1].z * object->M[3].y;
-	float A2312 = object->M[1].z * object->M[2].w - object->M[1].w * object->M[2].z;
-	float A1312 = object->M[1].y * object->M[2].w - object->M[1].w * object->M[2].y;
-	float A1212 = object->M[1].y * object->M[2].z - object->M[1].z * object->M[2].y;
-	float A0313 = object->M[1].x * object->M[3].w - object->M[1].w * object->M[3].x;
-	float A0213 = object->M[1].x * object->M[3].z - object->M[1].z * object->M[3].x;
-	float A0312 = object->M[1].x * object->M[2].w - object->M[1].w * object->M[2].x;
-	float A0212 = object->M[1].x * object->M[2].z - object->M[1].z * object->M[2].x;
-	float A0113 = object->M[1].x * object->M[3].y - object->M[1].y * object->M[3].x;
-	float A0112 = object->M[1].x * object->M[2].y - object->M[1].y * object->M[2].x;
+bool calcInvM(Object &object) {
+	float A2323 = object.M[2].z * object.M[3].w - object.M[2].w * object.M[3].z;
+	float A1323 = object.M[2].y * object.M[3].w - object.M[2].w * object.M[3].y;
+	float A1223 = object.M[2].y * object.M[3].z - object.M[2].z * object.M[3].y;
+	float A0323 = object.M[2].x * object.M[3].w - object.M[2].w * object.M[3].x;
+	float A0223 = object.M[2].x * object.M[3].z - object.M[2].z * object.M[3].x;
+	float A0123 = object.M[2].x * object.M[3].y - object.M[2].y * object.M[3].x;
+	float A2313 = object.M[1].z * object.M[3].w - object.M[1].w * object.M[3].z;
+	float A1313 = object.M[1].y * object.M[3].w - object.M[1].w * object.M[3].y;
+	float A1213 = object.M[1].y * object.M[3].z - object.M[1].z * object.M[3].y;
+	float A2312 = object.M[1].z * object.M[2].w - object.M[1].w * object.M[2].z;
+	float A1312 = object.M[1].y * object.M[2].w - object.M[1].w * object.M[2].y;
+	float A1212 = object.M[1].y * object.M[2].z - object.M[1].z * object.M[2].y;
+	float A0313 = object.M[1].x * object.M[3].w - object.M[1].w * object.M[3].x;
+	float A0213 = object.M[1].x * object.M[3].z - object.M[1].z * object.M[3].x;
+	float A0312 = object.M[1].x * object.M[2].w - object.M[1].w * object.M[2].x;
+	float A0212 = object.M[1].x * object.M[2].z - object.M[1].z * object.M[2].x;
+	float A0113 = object.M[1].x * object.M[3].y - object.M[1].y * object.M[3].x;
+	float A0112 = object.M[1].x * object.M[2].y - object.M[1].y * object.M[2].x;
 
 	float det =
-		object->M[0].x * (object->M[1].y * A2323 - object->M[1].z * A1323 + object->M[1].w * A1223)
-		- object->M[0].y * (object->M[1].x * A2323 - object->M[1].z * A0323 + object->M[1].w * A0223)
-		+ object->M[0].z * (object->M[1].x * A1323 - object->M[1].y * A0323 + object->M[1].w * A0123)
-		- object->M[0].w * (object->M[1].x * A1223 - object->M[1].y * A0223 + object->M[1].z * A0123);
+		object.M[0].x * (object.M[1].y * A2323 - object.M[1].z * A1323 + object.M[1].w * A1223)
+		- object.M[0].y * (object.M[1].x * A2323 - object.M[1].z * A0323 + object.M[1].w * A0223)
+		+ object.M[0].z * (object.M[1].x * A1323 - object.M[1].y * A0323 + object.M[1].w * A0123)
+		- object.M[0].w * (object.M[1].x * A1223 - object.M[1].y * A0223 + object.M[1].z * A0123);
 	if (det == 0.0f) {
 		return false;
 	}
 	det = 1 / det;
 
-	object->InvM[0] = float4(
-		det * (object->M[1].y * A2323 - object->M[1].z * A1323 + object->M[1].w * A1223),
-		det * -(object->M[0].y * A2323 - object->M[0].z * A1323 + object->M[0].w * A1223),
-		det * (object->M[0].y * A2313 - object->M[0].z * A1313 + object->M[0].w * A1213),
-		det * -(object->M[0].y * A2312 - object->M[0].z * A1312 + object->M[0].w * A1212)
+	object.InvM[0] = float4(
+		det * (object.M[1].y * A2323 - object.M[1].z * A1323 + object.M[1].w * A1223),
+		det * -(object.M[0].y * A2323 - object.M[0].z * A1323 + object.M[0].w * A1223),
+		det * (object.M[0].y * A2313 - object.M[0].z * A1313 + object.M[0].w * A1213),
+		det * -(object.M[0].y * A2312 - object.M[0].z * A1312 + object.M[0].w * A1212)
 	);
-	object->InvM[1] = float4(
-		det * -(object->M[1].x * A2323 - object->M[1].z * A0323 + object->M[1].w * A0223),
-		det * (object->M[0].x * A2323 - object->M[0].z * A0323 + object->M[0].w * A0223),
-		det * -(object->M[0].x * A2313 - object->M[0].z * A0313 + object->M[0].w * A0213),
-		det * (object->M[0].x * A2312 - object->M[0].z * A0312 + object->M[0].w * A0212)
+	object.InvM[1] = float4(
+		det * -(object.M[1].x * A2323 - object.M[1].z * A0323 + object.M[1].w * A0223),
+		det * (object.M[0].x * A2323 - object.M[0].z * A0323 + object.M[0].w * A0223),
+		det * -(object.M[0].x * A2313 - object.M[0].z * A0313 + object.M[0].w * A0213),
+		det * (object.M[0].x * A2312 - object.M[0].z * A0312 + object.M[0].w * A0212)
 	);
-	object->InvM[2] = float4(
-		det * (object->M[1].x * A1323 - object->M[1].y * A0323 + object->M[1].w * A0123),
-		det * -(object->M[0].x * A1323 - object->M[0].y * A0323 + object->M[0].w * A0123),
-		det * (object->M[0].x * A1313 - object->M[0].y * A0313 + object->M[0].w * A0113),
-		det * -(object->M[0].x * A1312 - object->M[0].y * A0312 + object->M[0].w * A0112)
+	object.InvM[2] = float4(
+		det * (object.M[1].x * A1323 - object.M[1].y * A0323 + object.M[1].w * A0123),
+		det * -(object.M[0].x * A1323 - object.M[0].y * A0323 + object.M[0].w * A0123),
+		det * (object.M[0].x * A1313 - object.M[0].y * A0313 + object.M[0].w * A0113),
+		det * -(object.M[0].x * A1312 - object.M[0].y * A0312 + object.M[0].w * A0112)
 	);
-	object->InvM[3] = float4(
-		det * -(object->M[1].x * A1223 - object->M[1].y * A0223 + object->M[1].z * A0123),
-		det * (object->M[0].x * A1223 - object->M[0].y * A0223 + object->M[0].z * A0123),
-		det * -(object->M[0].x * A1213 - object->M[0].y * A0213 + object->M[0].z * A0113),
-		det * (object->M[0].x * A1212 - object->M[0].y * A0212 + object->M[0].z * A0112)
+	object.InvM[3] = float4(
+		det * -(object.M[1].x * A1223 - object.M[1].y * A0223 + object.M[1].z * A0123),
+		det * (object.M[0].x * A1223 - object.M[0].y * A0223 + object.M[0].z * A0123),
+		det * -(object.M[0].x * A1213 - object.M[0].y * A0213 + object.M[0].z * A0113),
+		det * (object.M[0].x * A1212 - object.M[0].y * A0212 + object.M[0].z * A0112)
 	);
 	return true;
 }
 
-void TRS(Object *object, cl_float3 translation, float angle, cl_float3 axis, cl_float3 scale) {
+void TRS(Object &object, cl_float3 translation, float angle, cl_float3 axis, cl_float3 scale) {
 	cl_float3 R[3];
 	float c = cos(angle);
 	float s = sin(angle);
@@ -814,10 +813,10 @@ void TRS(Object *object, cl_float3 translation, float angle, cl_float3 axis, cl_
 	R[0] = float3(c + u.x*u.x*(1 - c), u.x*u.y*(1 - c) - u.z*s, u.x*u.z*(1 - c) + u.y*s);
 	R[1] = float3(u.y*u.x*(1 - c) + u.z*s, c + u.y*u.y*(1 - c), u.y*u.z*(1 - c) - u.x*s);
 	R[2] = float3(u.z*u.x*(1 - c) - u.y*s, u.z*u.y*(1 - c) + u.x*s, c + u.z*u.z*(1 - c));
-	object->M[0] = float4(R[0].x * scale.x, R[0].y * scale.y, R[0].z * scale.z, translation.x);
-	object->M[1] = float4(R[1].x * scale.x, R[1].y * scale.y, R[1].z * scale.z, translation.y);
-	object->M[2] = float4(R[2].x * scale.x, R[2].y * scale.y, R[2].z * scale.z, translation.z);
-	object->M[3] = float4(0, 0, 0, 1);
+	object.M[0] = float4(R[0].x * scale.x, R[0].y * scale.y, R[0].z * scale.z, translation.x);
+	object.M[1] = float4(R[1].x * scale.x, R[1].y * scale.y, R[1].z * scale.z, translation.y);
+	object.M[2] = float4(R[2].x * scale.x, R[2].y * scale.y, R[2].z * scale.z, translation.z);
+	object.M[3] = float4(0, 0, 0, 1);
 	calcInvM(object);
 }
 
@@ -887,7 +886,7 @@ void setLorentzBoost(Object &object, cl_float3 v) {
 	object.InvLorentz[3].x *= -1;
 };
 
-void initScene(Object* cpu_objects) {
+void initScene() {
 	if (!ReadTexture("textures/earth.jpg")) {
 		exit(EXIT_FAILURE);
 	}
@@ -905,8 +904,6 @@ void initScene(Object* cpu_objects) {
 	if (!ReadOBJ("models/StanfordBunny.obj", theMesh)) {
 		exit(EXIT_FAILURE);
 	}
-	queue.enqueueWriteBuffer(cl_objects, CL_TRUE, 0, object_count * sizeof(Object), cpu_objects);
-
 	white_point = float3(100, 100, 100);
 	ambient = 1;
 	/*
@@ -923,27 +920,23 @@ void initScene(Object* cpu_objects) {
 	dir = normalize(dir);
 
 	float cosC = dot(-1 * dir, normalize(p0));
-	std::cout << cosC << std::endl;
 	float b = magnitude(p0);
 
-	
+	cpu_objects.push_back(Object());
+	cpu_objects.back().color = float3(0.2f, 0.2f, 0.2f);
+	cpu_objects.back().textureIndex = textureValues[3];
+	cpu_objects.back().textureWidth = textureValues[4];
+	cpu_objects.back().textureHeight = textureValues[5];
+	cpu_objects.back().meshIndex = theMesh.meshIndices[0];
+	cpu_objects.back().type = MESH;
+	TRS(cpu_objects.back(), float3(0, -4, 18), 0, float3(0, 1, 0), float3(20, 20, -20));
 
-	
-	cpu_objects[0].color = float3(0.2f, 0.2f, 0.2f);
-	cpu_objects[0].textureIndex = textureValues[3];
-	cpu_objects[0].textureWidth = textureValues[4];
-	cpu_objects[0].textureHeight = textureValues[5];
-	cpu_objects[0].meshIndex = theMesh.meshIndices[0];
-	cpu_objects[0].type = MESH;
-	TRS(&cpu_objects[0], float3(0, -4, 18), 0, float3(0, 1, 0), float3(20, 20, -20));
-	
-
-	
-
-	for (int i = 1; i < object_count - 4; i++) {
-		cpu_objects[i].color = float3(i%3==0 ? 1.0f:0.0f, i%3==1?1.0f:0.0f, i%3==2?1.0f:0.0f);
-		cpu_objects[i].type = CUBE;
-		TRS(&cpu_objects[i], float3(-0.75f*(object_count - 4) + 1.5f*(i-1) + 0.25f, -4.5f, 15), 0.001f, float3(0, 1, 0), float3(0.5f, 0.5f, 0.5f));
+	int sphereCount = 16;
+	for (int i = 0; i < sphereCount; i++) {
+		cpu_objects.push_back(Object());
+		cpu_objects.back().color = float3(i%3==0 ? 1.0f:0.0f, i%3==1?1.0f:0.0f, i%3==2?1.0f:0.0f);
+		cpu_objects.back().type = CUBE;
+		TRS(cpu_objects.back(), float3(-0.75f*sphereCount + 1.5f*(i-1) + 0.25f, -4.5f, 15), 0.001f, float3(0, 1, 0), float3(0.5f, 0.5f, 0.5f));
 		/*
 		cpu_objects[i].type = SPHERE;
 		float c = magnitude(p0) + 2.0f * (i-1);
@@ -952,28 +945,31 @@ void initScene(Object* cpu_objects) {
 		std::cout << (p0 + dir * a).x << ", " << (float)(p0 + dir * a).y << ", " << (p0 + dir * a).z << std::endl;
 		*/
 	}
+	cpu_objects.push_back(Object());
+	cpu_objects.back().color = float3(1, 1, 1);
+	TRS(cpu_objects.back(), float3(0, -2, 21), 0, float3(0, 1, 0), float3(10, 10, 1));
+	cpu_objects.back().type = CUBE;
 
-	cpu_objects[object_count - 4].color = float3(1, 1, 1);
-	TRS(&cpu_objects[object_count - 4], float3(0, -2, 21), 0, float3(0, 1, 0), float3(10, 10, 1));
-	cpu_objects[object_count - 4].type = CUBE;
+	cpu_objects.push_back(Object());
+	cpu_objects.back().color = float3(1, 1, 1);
+	TRS(cpu_objects.back(), float3(0, 3, 16), 0, float3(0, 1, 0), float3(10, 1, 10));
+	cpu_objects.back().type = CUBE;
 
-	cpu_objects[object_count - 3].color = float3(1, 1, 1);
-	TRS(&cpu_objects[object_count - 3], float3(0, 3, 16), 0, float3(0, 1, 0), float3(10, 1, 10));
-	cpu_objects[object_count - 3].type = CUBE;
-
-	cpu_objects[object_count - 2].color = white_point;
-	cpu_objects[object_count - 2].type = CUBE;
-	cpu_objects[object_count - 2].light = true;
+	cpu_objects.push_back(Object());
+	cpu_objects.back().color = white_point;
+	cpu_objects.back().type = CUBE;
+	cpu_objects.back().light = true;
 	cl_float3 offset = float3(1, 0.5f, -1);
-	TRS(&cpu_objects[object_count - 2], float3(0, -3.5f, 16), 0.001f, float3(0, 1, 0), float3(0.5f, 0.5f, 0.5f));
+	TRS(cpu_objects.back(), float3(0, -3.5f, 16), 0.001f, float3(0, 1, 0), float3(0.5f, 0.5f, 0.5f));
 
-	cpu_objects[object_count-1].color = float3(0.9f, 0.8f, 0.7f);
-	cpu_objects[object_count-1].type = CUBE;
+	cpu_objects.push_back(Object());
+	cpu_objects.back().color = float3(0.9f, 0.8f, 0.7f);
+	cpu_objects.back().type = CUBE;
 	//cpu_objects[object_count-1].textureIndex = textureValues[6];
-	cpu_objects[object_count-1].textureWidth = textureValues[7];
-	cpu_objects[object_count-1].textureHeight = textureValues[8];
-	TRS(&cpu_objects[object_count-1], float3(0, -5.1f, 20), 0.01f, float3(0, 1, 0), float3(40, 0.1f, 40));
-	
+	cpu_objects.back().textureWidth = textureValues[7];
+	cpu_objects.back().textureHeight = textureValues[8];
+	TRS(cpu_objects.back(), float3(0, -5.1f, 20), 0.01f, float3(0, 1, 0), float3(40, 0.1f, 40));
+	queue.enqueueWriteBuffer(cl_objects, CL_TRUE, 0, cpu_objects.size() * sizeof(Object), cpu_objects.size() > 0 ? &cpu_objects[0] : NULL);
 }
 
 void keyDown(unsigned char key, int x, int y){
@@ -1000,7 +996,6 @@ void keyDown(unsigned char key, int x, int y){
 		downKeys[6] = true;
 		break;
 	}
-	std::cout << "Down: " << key << std::endl;
 }
 
 void keyUp(unsigned char key, int x, int y){
@@ -1027,7 +1022,6 @@ void keyUp(unsigned char key, int x, int y){
 		downKeys[6] = false;
 		break;
 	}
-	std::cout << "Up: " << key << std::endl;
 }
 
 
@@ -1038,6 +1032,8 @@ void initCLKernel(){
 
 	// Create a kernel (entry point in the OpenCL source program)
 	kernel = cl::Kernel(program, "render_kernel");
+
+	int object_count = cpu_objects.size();
 
 	// specify OpenCL kernel arguments
 	kernel.setArg(0, cl_objects);
@@ -1133,7 +1129,6 @@ void render(){
 		if (magnitude(dV) != 0) {
 			dV = tanh(frame_ms / 5000.0f) *  normalize(dV);
 			cameraVelocity = AddVelocity(cameraVelocity, dV);
-			std::cout << cameraVelocity.x << ", " << cameraVelocity.y << ", " << cameraVelocity.z << std::endl;
 		}
 		
 	}
@@ -1142,40 +1137,27 @@ void render(){
 	Lorentz(cameraLorentz, cameraVelocity);
 	Lorentz(cameraInvLorentz, -cameraVelocity);
 
-	for (int i = 0; i < object_count; i++) {
-		Identity(cpu_objects[i].Lorentz);
-		Identity(cpu_objects[i].InvLorentz);
+	for (Object &object : cpu_objects) {
+		Identity(object.Lorentz);
+		Identity(object.InvLorentz);
 	}
 
 	cl_float3 dir = float3(1, 0, 1);
 	dir = normalize(dir);
-	setLorentzBoost(cpu_objects[object_count - 2], float3((float)sqrt(3) / 2, 0, 0));
+	setLorentzBoost(cpu_objects[cpu_objects.size() - 2], float3((float)sqrt(3) / 2, 0, 0));
 
-	for (int i = 0; i < object_count; i++) {
-		MatrixMultiplyLeft(cpu_objects[i].Lorentz, cameraInvLorentz);
-		MatrixMultiplyRight(cameraLorentz, cpu_objects[i].InvLorentz);
-		cpu_objects[i].stationaryCam = float4(
-			dot(cpu_objects[i].Lorentz[0], cameraPos),
-			dot(cpu_objects[i].Lorentz[1], cameraPos),
-			dot(cpu_objects[i].Lorentz[2], cameraPos),
-			dot(cpu_objects[i].Lorentz[3], cameraPos)
+	for (Object &object : cpu_objects) {
+		MatrixMultiplyLeft(object.Lorentz, cameraInvLorentz);
+		MatrixMultiplyRight(cameraLorentz, object.InvLorentz);
+		object.stationaryCam = float4(
+			dot(object.Lorentz[0], cameraPos),
+			dot(object.Lorentz[1], cameraPos),
+			dot(object.Lorentz[2], cameraPos),
+			dot(object.Lorentz[3], cameraPos)
 		);
-		/*
-		std::cout << "{{" << cpu_objects[i].Lorentz[0].x << "," << cpu_objects[i].Lorentz[0].y << "," << cpu_objects[i].Lorentz[0].z << "," << cpu_objects[i].Lorentz[0].w << "},{"
-			<< cpu_objects[i].Lorentz[1].x << "," << cpu_objects[i].Lorentz[1].y << "," << cpu_objects[i].Lorentz[1].z << "," << cpu_objects[i].Lorentz[1].w << "},{"
-			<< cpu_objects[i].Lorentz[2].x << "," << cpu_objects[i].Lorentz[2].y << "," << cpu_objects[i].Lorentz[2].z << "," << cpu_objects[i].Lorentz[2].w << "},{"
-			<< cpu_objects[i].Lorentz[3].x << "," << cpu_objects[i].Lorentz[3].y << "," << cpu_objects[i].Lorentz[3].z << "," << cpu_objects[i].Lorentz[3].w << "}}" << std::endl;
-		
-		std::cout << "{{" << cpu_objects[i].InvLorentz[0].x << "," << cpu_objects[i].InvLorentz[0].y << "," << cpu_objects[i].InvLorentz[0].z << "," << cpu_objects[i].InvLorentz[0].w << "},{"
-			<< cpu_objects[i].InvLorentz[1].x << "," << cpu_objects[i].InvLorentz[1].y << "," << cpu_objects[i].InvLorentz[1].z << "," << cpu_objects[i].InvLorentz[1].w << "},{"
-			<< cpu_objects[i].InvLorentz[2].x << "," << cpu_objects[i].InvLorentz[2].y << "," << cpu_objects[i].InvLorentz[2].z << "," << cpu_objects[i].InvLorentz[2].w << "},{"
-			<< cpu_objects[i].InvLorentz[3].x << "," << cpu_objects[i].InvLorentz[3].y << "," << cpu_objects[i].InvLorentz[3].z << "," << cpu_objects[i].InvLorentz[3].w << "}}" << std::endl;
-		*/
 	}
 
-	//TRS(&cpu_objects[0], float3(0, -4 + sin(s)*2, 19), 0, float3(0, 1, 0), float3(20, 20, 20));
-	queue.enqueueWriteBuffer(cl_objects, CL_TRUE, 0, object_count * sizeof(Object), cpu_objects);
-
+	queue.enqueueWriteBuffer(cl_objects, CL_TRUE, 0, cpu_objects.size() * sizeof(Object), cpu_objects.size() > 0 ? &cpu_objects[0] : NULL);
 	kernel.setArg(0, cl_objects);
 
 	runKernel();
@@ -1189,7 +1171,6 @@ void cleanUp(){
 }
 
 void main(int argc, char** argv){
-	std::cout << sizeof(Object) << std::endl;
 	// initialise OpenGL (GLEW and GLUT window + callback functions)
 	initGL(argc, argv);
 	std::cout << "OpenGL initialized \n";
@@ -1207,10 +1188,10 @@ void main(int argc, char** argv){
 	glFinish();
 
 	// initialise scene
-	initScene(cpu_objects);
+	initScene();
 
-	cl_objects = cl::Buffer(context, CL_MEM_READ_ONLY, object_count * sizeof(Object));
-	queue.enqueueWriteBuffer(cl_objects, CL_TRUE, 0, object_count * sizeof(Object), cpu_objects);
+	cl_objects = cl::Buffer(context, CL_MEM_READ_ONLY, cpu_objects.size() * sizeof(Object));
+	queue.enqueueWriteBuffer(cl_objects, CL_TRUE, 0, cpu_objects.size() * sizeof(Object), cpu_objects.size() > 0 ? &cpu_objects[0] : NULL);
 
 	cl_vertices = cl::Buffer(context, CL_MEM_READ_ONLY, theMesh.vertices.size() * sizeof(cl_float3));
 	queue.enqueueWriteBuffer(cl_vertices, CL_TRUE, 0, theMesh.vertices.size() * sizeof(cl_float3), theMesh.vertices.size() > 0 ? &theMesh.vertices[0] : NULL);
