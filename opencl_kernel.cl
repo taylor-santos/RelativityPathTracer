@@ -65,7 +65,7 @@ Ray createCamRay(const float x_coord, const float y_coord, const int width, cons
 	float fy2 = fy - 0.5f;
 
 	/* determine position of pixel on screen */
-	float3 pixel_pos = (float3)(fx2, fy2, 1.0f);
+	float3 pixel_pos = (float3)(fx2, fy2, 0.5f);
 
 	/* create camera ray*/
 	Ray ray;

@@ -11,7 +11,8 @@
 #include <chrono>
 #include <map>
 #include <math.h>
-#include <thread>
+#include <cstdlib> // strtod
+#include <iomanip> // setprecision
 
 #include "gl_interop.h"
 #define cimg_use_jpeg
@@ -48,9 +49,11 @@ float ambient;
 cl_float4* cpu_output;
 cl_int err;
 unsigned int framenumber = 0;
-bool downKeys[7] = { false, false, false, false, false, false, false }; // w a s d q e space
+bool downKeys[8] = { false, false, false, false, false, false, false, false }; // w a s d q e r space
 cl_float3 cameraVelocity = { {0,0,0} };
 cl_float4 cameraPos = { {0,0,0,0} };
+bool stopTime = false;
+bool changedTime = false;
 
 
 // padding with dummy variables are required for memory alignment
@@ -78,6 +81,7 @@ struct Object
 };
 
 std::vector<Object> cpu_objects;
+std::vector<cl_float3> velocities;
 
 struct Octree
 {
@@ -806,13 +810,15 @@ bool calcInvM(Object &object) {
 }
 
 void TRS(Object &object, cl_float3 translation, float angle, cl_float3 axis, cl_float3 scale) {
-	cl_float3 R[3];
-	float c = cos(angle);
-	float s = sin(angle);
-	cl_float3 u = normalize(axis);
-	R[0] = float3(c + u.x*u.x*(1 - c), u.x*u.y*(1 - c) - u.z*s, u.x*u.z*(1 - c) + u.y*s);
-	R[1] = float3(u.y*u.x*(1 - c) + u.z*s, c + u.y*u.y*(1 - c), u.y*u.z*(1 - c) - u.x*s);
-	R[2] = float3(u.z*u.x*(1 - c) - u.y*s, u.z*u.y*(1 - c) + u.x*s, c + u.z*u.z*(1 - c));
+	cl_float3 R[3] = { float3(1,0,0), float3(0,1,0), float3(0,0,1) };
+	if (angle != 0) {
+		float c = cos(angle);
+		float s = sin(angle);
+		cl_float3 u = normalize(axis);
+		R[0] = float3(c + u.x*u.x*(1 - c), u.x*u.y*(1 - c) - u.z*s, u.x*u.z*(1 - c) + u.y*s);
+		R[1] = float3(u.y*u.x*(1 - c) + u.z*s, c + u.y*u.y*(1 - c), u.y*u.z*(1 - c) - u.x*s);
+		R[2] = float3(u.z*u.x*(1 - c) - u.y*s, u.z*u.y*(1 - c) + u.x*s, c + u.z*u.z*(1 - c));
+	}
 	object.M[0] = float4(R[0].x * scale.x, R[0].y * scale.y, R[0].z * scale.z, translation.x);
 	object.M[1] = float4(R[1].x * scale.x, R[1].y * scale.y, R[1].z * scale.z, translation.y);
 	object.M[2] = float4(R[2].x * scale.x, R[2].y * scale.y, R[2].z * scale.z, translation.z);
@@ -904,15 +910,15 @@ void initScene() {
 	if (!ReadOBJ("models/StanfordBunny.obj", theMesh)) {
 		exit(EXIT_FAILURE);
 	}
-	white_point = float3(100, 100, 100);
-	ambient = 1;
+	
 	/*
 	cpu_objects[0].textureIndex = textureValues[0];
 	cpu_objects[0].textureWidth = textureValues[1];
 	cpu_objects[0].textureHeight = textureValues[2];
 	*/
 	//cpu_objects[0].meshIndex = theMesh.meshIndices[0];
-
+	white_point = float3(100, 100, 100);
+	ambient = 1;
 
 
 	cl_float3 p0 = float3(2 * sqrt(2.0f) - 20.0f + 3, -4, 2 * sqrt(2.0f) + 2);
@@ -992,8 +998,11 @@ void keyDown(unsigned char key, int x, int y){
 	case 'e':
 		downKeys[5] = true;
 		break;
-	case ' ':
+	case 'r':
 		downKeys[6] = true;
+		break;
+	case ' ':
+		downKeys[7] = true;
 		break;
 	}
 }
@@ -1018,8 +1027,11 @@ void keyUp(unsigned char key, int x, int y){
 	case 'e':
 		downKeys[5] = false;
 		break;
-	case ' ':
+	case 'r':
 		downKeys[6] = false;
+		break;
+	case ' ':
+		downKeys[7] = false;
 		break;
 	}
 }
@@ -1114,8 +1126,23 @@ void render(){
 	cl_float4 cameraLorentz[4];
 	cl_float4 cameraInvLorentz[4];
 
+	if (downKeys[7]) {
+		if (!changedTime) {
+			changedTime = true;
+			stopTime = !stopTime;
+		}
+	}
+	else {
+		changedTime = false;
+	}
+
 	if (downKeys[6]) {
 		cameraVelocity = float3(0, 0, 0);
+		std::cout.precision(5);
+		std::cout << "V: (" << std::fixed
+			<< cameraVelocity.x << ", "
+			<< cameraVelocity.y << ", "
+			<< cameraVelocity.z << ")" << std::endl;
 	}
 	else {
 		cl_float3 dV = float3(0, 0, 0);
@@ -1129,10 +1156,15 @@ void render(){
 		if (magnitude(dV) != 0) {
 			dV = tanh(frame_ms / 5000.0f) *  normalize(dV);
 			cameraVelocity = AddVelocity(cameraVelocity, dV);
+			std::cout.precision(5);
+			std::cout << "V: (" << std::fixed
+				<< cameraVelocity.x << ", "
+				<< cameraVelocity.y << ", "
+				<< cameraVelocity.z << ")" << std::endl;
 		}
 		
 	}
-	cameraPos = float4(currTime, 0, 0, 0);
+	if (!stopTime) cameraPos += float4(frame_ms/1000.0f, 0, 0, 0);
 	
 	Lorentz(cameraLorentz, cameraVelocity);
 	Lorentz(cameraInvLorentz, -cameraVelocity);
@@ -1144,16 +1176,16 @@ void render(){
 
 	cl_float3 dir = float3(1, 0, 1);
 	dir = normalize(dir);
-	setLorentzBoost(cpu_objects[cpu_objects.size() - 2], float3((float)sqrt(3) / 2, 0, 0));
-
-	for (Object &object : cpu_objects) {
-		MatrixMultiplyLeft(object.Lorentz, cameraInvLorentz);
-		MatrixMultiplyRight(cameraLorentz, object.InvLorentz);
-		object.stationaryCam = float4(
-			dot(object.Lorentz[0], cameraPos),
-			dot(object.Lorentz[1], cameraPos),
-			dot(object.Lorentz[2], cameraPos),
-			dot(object.Lorentz[3], cameraPos)
+	
+	for (int i = 0; i < cpu_objects.size(); i++) {
+		setLorentzBoost(cpu_objects[i], velocities[i]);
+		MatrixMultiplyLeft(cpu_objects[i].Lorentz, cameraInvLorentz);
+		MatrixMultiplyRight(cameraLorentz, cpu_objects[i].InvLorentz);
+		cpu_objects[i].stationaryCam = float4(
+			dot(cpu_objects[i].Lorentz[0], cameraPos),
+			dot(cpu_objects[i].Lorentz[1], cameraPos),
+			dot(cpu_objects[i].Lorentz[2], cameraPos),
+			dot(cpu_objects[i].Lorentz[3], cameraPos)
 		);
 	}
 
@@ -1164,6 +1196,193 @@ void render(){
 
 	drawGL();
 
+}
+
+void inputScene() {
+	white_point = float3(1, 1, 1);
+	ambient = 1.0;
+	std::string line;
+	bool done = false;
+	do {
+		std::getline(std::cin, line);
+		char *str = strdup(line.c_str());
+		char *tok = strtok(str, " ");
+		char *endptr;
+		char *curr;
+		float args[10];
+		while (!done && tok) {
+			
+			switch (tok[0]) {
+			case 'O':
+				if (strlen(tok) < 2) {
+					std::cerr << "Object command missing argument" << std::endl;
+					break;
+				}
+				switch (tok[1]) {
+				case 's':
+					cpu_objects.push_back(Object());
+					velocities.push_back(float3(0, 0, 0));
+					cpu_objects.back().type = SPHERE;
+					break;
+				case 'c':
+					cpu_objects.push_back(Object());
+					velocities.push_back(float3(0, 0, 0));
+					cpu_objects.back().type = CUBE;
+					break;
+				case 'm':
+					if (strlen(tok) != 3) {
+						std::cerr << "Object mesh command missing argument" << std::endl;
+						break;
+					}
+					cpu_objects.push_back(Object());
+					velocities.push_back(float3(0, 0, 0));
+					cpu_objects.back().type = MESH;
+					cpu_objects.back().meshIndex = atoi(tok + 2);
+					break;
+				default:
+					std::cerr << "Object command unrecognized argument: \"" << tok+1 << "\"" << std::endl;
+				}
+				break;
+			case 'p':
+				if (cpu_objects.size() == 0) {
+					std::cerr << "Object must be defined before applying a transformation" << std::endl;
+					break;
+				}
+				if (strlen(tok) < 2) {
+					std::cerr << "Transformation command missing argument" << std::endl;
+					break;
+				}
+				curr = tok + 1;
+				for (int arg = 0; arg < 10; arg++) {
+					args[arg] = strtod(curr, &endptr);
+					curr = endptr + 1;
+				}
+				TRS(cpu_objects.back(), float3(args[0], args[1], args[2]), args[3], float3(args[4], args[5], args[6]), float3(args[7], args[8], args[9]));
+				break;
+			case 'c':
+				if (cpu_objects.size() == 0) {
+					std::cerr << "Object must be defined before applying a transformation" << std::endl;
+					break;
+				}
+				if (strlen(tok) < 2) {
+					std::cerr << "Color command missing argument" << std::endl;
+					break;
+				}
+				curr = tok + 1;
+				for (int arg = 0; arg < 3; arg++) {
+					args[arg] = strtod(curr, &endptr);
+					curr = endptr + 1;
+				}
+				cpu_objects.back().color = float3(args[0], args[1], args[2]);
+				break;
+			case 't':
+				if (cpu_objects.size() == 0) {
+					std::cerr << "Object must be defined before applying a texture" << std::endl;
+					break;
+				}
+				if (strlen(tok) < 2) {
+					std::cerr << "Texture command missing argument" << std::endl;
+					break;
+				}
+				cpu_objects.back().textureIndex = atoi(tok + 1);
+				break;
+			case 'l':
+				if (cpu_objects.size() == 0) {
+					std::cerr << "Object must be defined before applying a light" << std::endl;
+					break;
+				}
+				if (strlen(tok) < 2) {
+					std::cerr << "Velocity command missing argument" << std::endl;
+					break;
+				}
+				cpu_objects.back().light = atoi(tok + 1);
+				break;
+			case 'v':
+				if (cpu_objects.size() == 0) {
+					std::cerr << "Object must be defined before applying a velocity" << std::endl;
+					break;
+				}
+				if (strlen(tok) < 2) {
+					std::cerr << "Velocity command missing argument" << std::endl;
+					break;
+				}
+				curr = tok + 1;
+				for (int arg = 0; arg < 3; arg++) {
+					args[arg] = strtod(curr, &endptr);
+					curr = endptr + 1;
+				}
+				velocities.back() = float3(args[0], args[1], args[2]);
+				break;
+			case 'T':
+				if (strlen(tok) < 2) {
+					std::cerr << "Texture command missing argument" << std::endl;
+					break;
+				}
+				if (!ReadTexture(tok+1)) {
+					exit(EXIT_FAILURE);
+				}
+				break;
+			case 'M':
+				if (strlen(tok) < 2) {
+					std::cerr << "Mesh command missing argument" << std::endl;
+					break;
+				}
+				if (!ReadOBJ(tok+1, theMesh)) {
+					exit(EXIT_FAILURE);
+				}
+				break;
+			case 'A':
+				if (strlen(tok) < 2) {
+					std::cerr << "Ambient command missing argument" << std::endl;
+					break;
+				}
+				ambient = atof(tok + 1);
+				break;
+			case 'W':
+				if (strlen(tok) < 2) {
+					std::cerr << "White-point command missing argument" << std::endl;
+					break;
+				}
+				curr = tok + 1;
+				for (int arg = 0; arg < 3; arg++) {
+					args[arg] = strtod(curr, &endptr);
+					curr = endptr + 1;
+				}
+				white_point = float3(args[0], args[1], args[2]);
+				break;
+			case 'R':
+				done = true;
+				break;
+			default:
+				std::cerr << "Unrecognized command: \"" << tok << "\"" << std::endl;
+			}
+			tok = strtok(NULL, " ");
+		}
+		free(str);
+	} while (!done);
+	for (Object &object : cpu_objects) {
+		int index = object.textureIndex;
+		if (index != -1) {
+			if (3 * (index + 1) > textureValues.size()) {
+				std::cerr << "Error: Texture index " << index << " out of range";
+				exit(EXIT_FAILURE);
+			}
+			object.textureIndex = textureValues[3 * index + 0];
+			object.textureWidth = textureValues[3 * index + 1];
+			object.textureHeight = textureValues[3 * index + 2];
+		}
+		
+		if (object.type == MESH) {
+			index = object.meshIndex;
+			if (index < 0 || index >= theMesh.meshIndices.size()) {
+				std::cerr << "Error: Mesh index " << index << " out of range";
+				exit(EXIT_FAILURE);
+			}
+			object.meshIndex = theMesh.meshIndices[index];
+		}
+	}
+
+	queue.enqueueWriteBuffer(cl_objects, CL_TRUE, 0, cpu_objects.size() * sizeof(Object), cpu_objects.size() > 0 ? &cpu_objects[0] : NULL);
 }
 
 void cleanUp(){
@@ -1187,8 +1406,10 @@ void main(int argc, char** argv){
 	//make sure OpenGL is finished before we proceed
 	glFinish();
 
+	inputScene();
+
 	// initialise scene
-	initScene();
+	//initScene();
 
 	cl_objects = cl::Buffer(context, CL_MEM_READ_ONLY, cpu_objects.size() * sizeof(Object));
 	queue.enqueueWriteBuffer(cl_objects, CL_TRUE, 0, cpu_objects.size() * sizeof(Object), cpu_objects.size() > 0 ? &cpu_objects[0] : NULL);
