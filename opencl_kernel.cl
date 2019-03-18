@@ -6,10 +6,6 @@
 __constant float EPSILON = 0.0000001f;
 __constant int MSAASAMPLES = 1;
 
-#define SPACELIKE 0
-#define LIGHTLIKE -1
-#define INTERVAL LIGHTLIKE
-
 typedef struct Ray{
 	float3 origin;
 	float3 dir;
@@ -377,6 +373,7 @@ float3 EncodeFloatRGB(float v) {
 bool intersect_scene(
 	global const Object* objects,
 	const int object_count,
+	const int interval,
 	global const float3 *vertices,
 	global const float3 *normals,
 	global const float2 *uvs,
@@ -402,7 +399,7 @@ bool intersect_scene(
 		newHit.dist = inf;
 		Ray4D newRay;
 		float4 newEvent0 = objects[i].stationaryCam;
-		float4 lightDir = (float4)(INTERVAL, normalize(ray->dir)); //Set t=0 for spacelike, set t=-1 for lightlike
+		float4 lightDir = (float4)(interval, normalize(ray->dir)); //Set t=0 for spacelike, set t=-1 for lightlike
 		lightDir = transformPoint4D(objects[i].Lorentz, lightDir);
 		//lightDir /= length(lightDir.yzw);
 		newRay.origin = newEvent0;
@@ -519,6 +516,7 @@ bool intersect_scene(
 int sample_light(
 	global const Object* objects,
 	const int object_count,
+	const int interval,
 	global const float3 *vertices,
 	global const float3 *normals,
 	global const float2 *uvs,
@@ -546,7 +544,7 @@ int sample_light(
 			newHit.dist = inf;
 			Ray4D newRay;
 			float4 newEvent0 = transformPoint4D(objects[i].Lorentz, ray->origin);
-			float4 lightDir = (float4)(INTERVAL, normalize(ray->dir.yzw));
+			float4 lightDir = (float4)(interval, normalize(ray->dir.yzw));
 			lightDir = transformPoint4D(objects[i].Lorentz, lightDir);
 			//lightDir /= length(lightDir.yzw);
 			newRay.origin = newEvent0;
@@ -584,6 +582,7 @@ int sample_light(
 float3 trace(
 	global const Object* objects,
 	const int object_count,
+	const int interval,
 	global const float3 *vertices,
 	global const float3 *normals,
 	global const float2 *uvs,
@@ -596,31 +595,28 @@ float3 trace(
 	const Ray* camray
 ) {
 	Hit hit;
-	if (!intersect_scene(objects, object_count, vertices, normals, uvs, triangles, octrees, octreeTris, textures, camray, time, &hit))
+	if (!intersect_scene(objects, object_count, interval, vertices, normals, uvs, triangles, octrees, octreeTris, textures, camray, time, &hit))
 		return (float3)(0.15f, 0.15f, 0.25f);
 
-	float3 color = hit.color * ambient;// *(normal.y > 0 ? normal.y + 0.2f : 0.2f);
+	float3 color = hit.color * ambient;
 
 	if (objects[hit.object].light) {
 		color += hit.color;
 	}
-	for (int i = 0; i < object_count; i++) {
-		if (i != hit.object && objects[i].light) {
-			float4 cameraPos_ObjFrame = objects[hit.object].stationaryCam;
-			float4 rayDir = (float4)(INTERVAL, normalize(camray->dir));
-			float4 rayDir_ObjFrame = transformPoint4D(objects[hit.object].Lorentz, rayDir);
-			float4 hitPos_ObjFrame = cameraPos_ObjFrame + rayDir_ObjFrame * hit.dist;
-			hitPos_ObjFrame += (float4)(0, hit.normal * 0.001f);
-			float4 hitPos = transformPoint4D(objects[hit.object].InvLorentz, hitPos_ObjFrame);
-			//color = EncodeFloatRGB(hitPos.x);
-			//break;
-			if (INTERVAL == LIGHTLIKE) {
-				
+	if (interval != 0) {
+		for (int i = 0; i < object_count; i++) {
+			if (i != hit.object && objects[i].light) {
+				float4 cameraPos_ObjFrame = objects[hit.object].stationaryCam;
+				float4 rayDir = (float4)(interval, normalize(camray->dir));
+				float4 rayDir_ObjFrame = transformPoint4D(objects[hit.object].Lorentz, rayDir);
+				float4 hitPos_ObjFrame = cameraPos_ObjFrame + rayDir_ObjFrame * hit.dist;
+				hitPos_ObjFrame += (float4)(0, hit.normal * 0.001f);
+				float4 hitPos = transformPoint4D(objects[hit.object].InvLorentz, hitPos_ObjFrame);				
 				float4 hitPos_LightFrame = transformPoint4D(objects[i].Lorentz, hitPos);
 				float3 hitPos3_LightFrame = hitPos_LightFrame.yzw;
 				float3 lightPos3_LightFrame = (float3)(objects[i].M[0].w, objects[i].M[1].w, objects[i].M[2].w);
 				float3 lightDir3_LightFrame = lightPos3_LightFrame - hitPos3_LightFrame;
-				float4 lightDir_LightFrame = (float4)(INTERVAL * length(lightDir3_LightFrame), lightDir3_LightFrame);
+				float4 lightDir_LightFrame = (float4)(interval * length(lightDir3_LightFrame), lightDir3_LightFrame);
 				float4 lightDir = transformPoint4D(objects[i].InvLorentz, lightDir_LightFrame);
 				float4 lightDir_ObjFrame = transformPoint4D(objects[hit.object].Lorentz, lightDir);
 				float3 lightDir3_ObjFrame = lightDir_ObjFrame.yzw;
@@ -628,9 +624,9 @@ float3 trace(
 
 				if (dot(hit.normal, unitLightDir3) > 0) {
 					Ray4D newRay;
-					newRay.dir = (float4)(INTERVAL, normalize(lightDir.yzw));
+					newRay.dir = (float4)(interval, normalize(lightDir.yzw));
 					newRay.origin = hitPos;
-					int shadowIndex = sample_light(objects, object_count, vertices, normals, uvs, triangles, octrees, octreeTris, textures, &newRay, time, length(lightDir.yzw), i);
+					int shadowIndex = sample_light(objects, object_count, interval, vertices, normals, uvs, triangles, octrees, octreeTris, textures, &newRay, time, length(lightDir.yzw), i);
 					if (shadowIndex == -1) {
 						color += dot(hit.normal, unitLightDir3) / (1.0f + 0.1f * length(lightDir3_ObjFrame) + 0.01f*dot(lightDir3_ObjFrame, lightDir3_ObjFrame)) * hit.color * objects[i].color;
 					}
@@ -672,18 +668,18 @@ __kernel void render_kernel(
 	const float ambient,
 	const int width,
 	const int height,
+	const int interval,
 	__global float3* output
 ) {
 	unsigned int work_item_id = get_global_id(0);	/* the unique global id of the work item for the current pixel */
 	unsigned int x_coord = work_item_id % width;			/* x-coordinate of the pixel */
 	unsigned int y_coord = work_item_id / width;			/* y-coordinate of the pixel */
-	
-	float3 finalcolor = (float3)(0, 0, 0);
 
+	float3 finalcolor = (float3)(0, 0, 0);
 	for (int y = 0; y < MSAASAMPLES; y++) {
 		for (int x = 0; x < MSAASAMPLES; x++) {
 			Ray camray = createCamRay((float)x_coord + (float)x/MSAASAMPLES, (float)y_coord + (float)y/ MSAASAMPLES, width, height);
-			finalcolor += trace(objects, object_count, vertices, normals, uvs, triangles, octrees, octreeTris, textures, ambient, 0, &camray);
+			finalcolor += trace(objects, object_count, interval, vertices, normals, uvs, triangles, octrees, octreeTris, textures, ambient, 0, &camray);
 		}
 	}
 	finalcolor = finalcolor / (MSAASAMPLES*MSAASAMPLES);

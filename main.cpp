@@ -49,11 +49,13 @@ float ambient;
 cl_float4* cpu_output;
 cl_int err;
 unsigned int framenumber = 0;
-bool downKeys[8] = { false, false, false, false, false, false, false, false }; // w a s d q e r space
+bool downKeys[9] = { false, false, false, false, false, false, false, false, false }; // w a s d q e r space i
 cl_float3 cameraVelocity = { {0,0,0} };
 cl_float4 cameraPos = { {0,0,0,0} };
-bool stopTime = false;
+bool stopTime = true;
+int interval = -1;
 bool changedTime = false;
+bool changedInterval = false;
 
 
 // padding with dummy variables are required for memory alignment
@@ -1004,6 +1006,9 @@ void keyDown(unsigned char key, int x, int y){
 	case ' ':
 		downKeys[7] = true;
 		break;
+	case 'i':
+		downKeys[8] = true;
+		break;
 	}
 }
 
@@ -1033,6 +1038,9 @@ void keyUp(unsigned char key, int x, int y){
 	case ' ':
 		downKeys[7] = false;
 		break;
+	case 'i':
+		downKeys[8] = false;
+		break;
 	}
 }
 
@@ -1061,7 +1069,8 @@ void initCLKernel(){
 	kernel.setArg(10, ambient);
 	kernel.setArg(11, window_width);
 	kernel.setArg(12, window_height);
-	kernel.setArg(13, cl_vbo);
+	kernel.setArg(13, interval);
+	kernel.setArg(14, cl_vbo);
 }
 
 void runKernel(){
@@ -1119,7 +1128,7 @@ void render(){
 		cl_vbos[0] = cl_vbo;
 		kernel.setArg(11, window_width);
 		kernel.setArg(12, window_height);
-		kernel.setArg(13, cl_vbo);
+		kernel.setArg(14, cl_vbo);
 	}
 	float s = ms / 1000.0f;
 
@@ -1130,10 +1139,24 @@ void render(){
 		if (!changedTime) {
 			changedTime = true;
 			stopTime = !stopTime;
+			if (stopTime) std::cout << "PAUSED" << std::endl;
+			else std::cout << "UNPAUSED" << std::endl;
 		}
 	}
 	else {
 		changedTime = false;
+	}
+
+	if (downKeys[8]) {
+		if (!changedInterval) {
+			changedInterval = true;
+			interval = -!interval;
+			kernel.setArg(13, interval);
+			std::cout << "Interval: " << interval << std::endl;
+		}
+	}
+	else {
+		changedInterval = false;
 	}
 
 	if (downKeys[6]) {

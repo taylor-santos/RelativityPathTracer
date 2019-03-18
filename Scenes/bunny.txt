@@ -1,0 +1,11 @@
+MModels/StanfordBunny.obj
+TTextures/StanfordBunnyTerracotta.jpg
+Om0
+ p-0.5,-3,5,3.14,0,1,0,20,20,20
+ t0
+Os
+ l1
+ p0,2,4,0,0,0,0,0.1,0.1,0.1
+ c1,1,1
+A0.2
+R
