@@ -209,12 +209,12 @@ bool intersect_octree(
 	global const unsigned int *triangles,
 	global const Octree *octrees,
 	global const int *octreeTris,
-	const Ray *ray,
+	const Ray4D *ray,
 	Hit *hit
 ) {
 	Ray newRay;
-	newRay.origin = transformPoint(objects[index].InvM, ray->origin);
-	newRay.dir = transformDirection(objects[index].InvM, ray->dir);
+	newRay.origin = transformPoint(objects[index].InvM, ray->origin.yzw);
+	newRay.dir = transformDirection(objects[index].InvM, ray->dir.yzw);
 	double scale = length(newRay.dir);
 	newRay.dir /= scale;
 
@@ -250,7 +250,8 @@ bool intersect_octree(
 		uv = newRay.origin + newRay.dir * d.s0;
 	}
 
-	double3 scaledDir = normalize(newRay.dir / (octrees[currOctreeIndex].max - octrees[currOctreeIndex].min));
+	double3 scaledDir = newRay.dir / (octrees[currOctreeIndex].max - octrees[currOctreeIndex].min);
+	scaledDir = normalize(scaledDir);
 	while(currOctreeIndex != -1) {
 		Octree curr = octrees[currOctreeIndex];
 		double3 extents = curr.max - curr.min;
@@ -261,11 +262,7 @@ bool intersect_octree(
 			currOctreeIndex = curr.children[childIndex];
 			curr = octrees[currOctreeIndex];
 		}
-		for (
-			int i = curr.trisIndex;
-			i < curr.trisIndex + curr.trisCount;
-			i++
-			) {
+		for (int i = curr.trisIndex; i < curr.trisIndex + curr.trisCount; i++) {
 			int tri = octreeTris[i];
 			double3 A = vertices[triangles[9 * tri + 3 * 0]];
 			double3 B = vertices[triangles[9 * tri + 3 * 1]];
@@ -306,7 +303,7 @@ bool intersect_octree(
 
 		double3 objPoint = newRay.origin + hit->dist * newRay.dir;
 		double3 worldPoint = transformPoint(objects[index].M, objPoint);
-		hit->dist = length(worldPoint - ray->origin) / scale;
+		hit->dist = length(worldPoint - ray->origin.yzw) / length(ray->dir.yzw);
 		
 		return true;
 	}
@@ -317,7 +314,6 @@ double max3(double3 v) { return max(max(v.x, v.y), v.z); }
 
 bool intersect_cube(global const Object *objects, int index, const Ray4D *ray, Hit *hit) {
 	/* http://www.jcgt.org/published/0007/03/04/paper-lowres.pdf */
-	Ray newRay;
 	double3 origin = transformPoint(objects[index].InvM, ray->origin.yzw);
 	double3 dir = transformDirection(objects[index].InvM, ray->dir.yzw);
 	double scale = length(dir);
@@ -367,6 +363,15 @@ bool intersect_sphere(global const Object *objects, const int index, const Ray4D
 
 double modulo(double a, double b) {
 	return (a - b * floor(a / b));
+}
+
+
+double3 EncodeFloatRGB(double v) {
+	double val = 1.0 / (1 + pow(1.1, -v));
+	double3 enc = (double3)(1.0, 255.0, 65025.0)*val;
+	enc -= floor(enc);
+	enc -= enc.yzz * (double3)(1 / 255.0, 1 / 255.0, 0);
+	return enc;
 }
 
 bool intersect_scene(
@@ -428,7 +433,6 @@ bool intersect_scene(
 				}
 			}
 			break;
-			/*
 		case MESH:
 			if (intersect_octree(objects, i, vertices, normals, uvs, triangles, octrees, octreeTris, &newRay, &newHit)) {
 				if (newHit.dist < hit->dist) {
@@ -438,7 +442,6 @@ bool intersect_scene(
 				}
 			}
 			break;
-			*/
 		}
 		
 	}
@@ -503,6 +506,7 @@ bool intersect_scene(
 
 		hit->color = (double3)(r / 255.0, g / 255.0, b / 255.0);
 		*/
+		//hit->color = EncodeFloatRGB(hit->dist);
 		return true;
 	}
 	return false;
@@ -559,30 +563,19 @@ int sample_light(
 					}
 				}
 				break;
-				/*
 			case MESH:
 				if (intersect_octree(objects, i, vertices, normals, uvs, triangles, octrees, octreeTris, &newRay, &newHit)) {
-					if (newHit.dist < hit->dist) {
-						*hit = newHit;
-						hit->object = i;
-						didHit = true;
+					if (newHit.dist < lightDist) {
+						return i;
 					}
 				}
 				break;
-				*/
 			}
 		}
 	}
 	return -1;
 }
 
-double3 EncodeFloatRGB(double v) {
-	double val = 1.0 / (1 + pow(1.1, -v));
-	double3 enc = (double3)(1.0, 255.0, 65025.0)*val;
-	enc -= floor(enc);
-	enc -= enc.yzz * (double3)(1 / 255.0, 1 / 255.0, 0);
-	return enc;
-}
 
 double3 trace(
 	global const Object* objects,

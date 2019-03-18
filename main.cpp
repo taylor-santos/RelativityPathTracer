@@ -905,11 +905,10 @@ void initScene(Object* cpu_objects) {
 	if (!ReadOBJ("models/pear.obj", theMesh)) {
 		exit(EXIT_FAILURE);
 	}
-	/*
+	*/
 	if (!ReadOBJ("models/StanfordBunny.obj", theMesh)) {
 		exit(EXIT_FAILURE);
 	}
-	*/
 	queue.enqueueWriteBuffer(cl_objects, CL_TRUE, 0, object_count * sizeof(Object), cpu_objects);
 
 	white_point = double3(100, 100, 100);
@@ -935,21 +934,17 @@ void initScene(Object* cpu_objects) {
 
 	
 	cpu_objects[0].color = double3(0.2, 0.2, 0.2);
-	//cpu_objects[0].textureIndex = textureValues[0];
-	cpu_objects[0].textureWidth = textureValues[1];
-	cpu_objects[0].textureHeight = textureValues[2];
+	cpu_objects[0].textureIndex = textureValues[3];
+	cpu_objects[0].textureWidth = textureValues[4];
+	cpu_objects[0].textureHeight = textureValues[5];
+	cpu_objects[0].meshIndex = theMesh.meshIndices[0];
 	cpu_objects[0].type = MESH;
-	TRS(&cpu_objects[0], p0 + 10 * dir, 0, double3(0, 1, 0), double3(1, 1, 1));
-	TRS(&cpu_objects[0], double3(0, -1, 12), 0, double3(0, 1, 0), double3(1, 1, 1));
+	TRS(&cpu_objects[0], double3(0, -4, 17), 0, double3(0, 1, 0), double3(20, 20, 20));
 	
 
-	cpu_objects[object_count - 2].color = white_point;
-	cpu_objects[object_count - 2].type = CUBE;
-	cpu_objects[object_count - 2].light = true;
-	cl_double3 offset = double3(1, 0.5, -1);
-	TRS(&cpu_objects[object_count - 2], double3(0, -3.5, 15), 0.001, double3(0, 1, 0), double3(0.5, 0.5, 0.5));
+	
 
-	for (int i = 1; i < object_count - 2; i++) {
+	for (int i = 1; i < object_count - 4; i++) {
 		cpu_objects[i].color = double3(i%3==0 ? 1.0:0.0, i%3==1?1.0:0.0, i%3==2?1.0:0.0);
 		cpu_objects[i].type = CUBE;
 		TRS(&cpu_objects[i], double3(-0.75*(object_count - 4) + 1.5*(i-1) + 0.25, -4.5, 15), 0.001, double3(0, 1, 0), double3(0.5, 0.5, 0.5));
@@ -961,88 +956,27 @@ void initScene(Object* cpu_objects) {
 		std::cout << (p0 + dir * a).x << ", " << (double)(p0 + dir * a).y << ", " << (p0 + dir * a).z << std::endl;
 		*/
 	}
+
+	cpu_objects[object_count - 4].color = double3(1, 1, 1);
+	TRS(&cpu_objects[object_count - 4], double3(-3.3, -2, 19), 0, double3(0, 1, 0), double3(10, 10, 1));
+	cpu_objects[object_count - 4].type = CUBE;
+
+	cpu_objects[object_count - 3].color = double3(1, 1, 1);
+	TRS(&cpu_objects[object_count - 3], double3(2.5, -2, 16), 0, double3(0, 1, 0), double3(1, 1, 1));
+	cpu_objects[object_count - 3].type = CUBE;
+
+	cpu_objects[object_count - 2].color = white_point;
+	cpu_objects[object_count - 2].type = CUBE;
+	cpu_objects[object_count - 2].light = true;
+	cl_double3 offset = double3(1, 0.5, -1);
+	TRS(&cpu_objects[object_count - 2], double3(0, -3.5, 16), 0.001, double3(0, 1, 0), double3(0.5, 0.5, 0.5));
+
 	cpu_objects[object_count-1].color = float3(0.9f, 0.8f, 0.7f);
 	cpu_objects[object_count-1].type = CUBE;
 	//cpu_objects[object_count-1].textureIndex = textureValues[6];
 	cpu_objects[object_count-1].textureWidth = textureValues[7];
 	cpu_objects[object_count-1].textureHeight = textureValues[8];
 	TRS(&cpu_objects[object_count-1], double3(0, -5.1, 20), 0.01, double3(0, 1, 0), double3(40, 0.1, 40));
-	//offset = double3(1, -5.1, -1);
-	//TRS(&cpu_objects[object_count - 1], p0 + offset + 200 * dir, 0, double3(0, 1, 0), double3(40, 0.1, 40));
-
-	/*
-
-	cpu_objects[object_count/2].color = double3(169 / 255.0, 168 / 255.0, 54 / 255.0);
-	cpu_objects[object_count/2].type = SPHERE;
-	//cpu_objects[object_count/2].meshIndex = theMesh.meshIndices[0];
-	TRS(&cpu_objects[object_count/2], double3(-5 + 3, 2, 10), 3.1415926 / 4, double3(0, 1, 0), double3(1, 1, 1));
-	setLorentzBoost(&cpu_objects[object_count/2], double3(-0.999 / sqrt(2.0), 0, -0.999 / sqrt(2.0)));
-	for (int i = object_count / 2 + 1; i < object_count; i++) {
-		cpu_objects[i].color = double3(i % 3 == 1 ? 1.0 : 0.0, i % 3 == 2 ? 1.0 : 0.0, i % 3 == 0 ? 1.0 : 0.0);
-		cpu_objects[i].type = SPHERE;
-		TRS(&cpu_objects[i], double3(2 * sqrt(2.0)*(i-object_count/2) - 10.0 + 3, 2, 2 * sqrt(2.0)*(i - object_count / 2)+5), 3.1415926 / 4, double3(0, 1, 0), double3(1, 1, 1));
-	}
-
-
-
-	/*
-	// left wall
-	cpu_objects[0].color = float3(0.75f, 0.25f, 0.25f);
-	cpu_objects[0].type = CUBE;
-	TRS(&cpu_objects[0], double3(60, 0, 10), 0, double3(0, 1, 0), double3(0.1f, 10, 10));
-
-	// right wall
-	cpu_objects[1].color = float3(0.25f, 0.25f, 0.75f);
-	cpu_objects[1].type = CUBE;
-	TRS(&cpu_objects[1], double3(60, 0, 10), 0, double3(0, 1, 0), double3(0.1f, 10, 10));
-
-	// floor
-	cpu_objects[2].color = float3(0.25f, 0.75f, 0.25f);
-	cpu_objects[2].type = CUBE;
-	TRS(&cpu_objects[2], double3(0, -6, 10), 0, double3(0, 1, 0), double3(10, 0.1f, 10));
-
-	// ceiling
-	cpu_objects[3].color = float3(0.9, 0.8, 0.7);
-	cpu_objects[3].type = CUBE;
-	TRS(&cpu_objects[3], double3(0, 6, 10), 0, double3(0, 1, 0), double3(10, 0.1f, 10));
-
-	// cube
-	cpu_objects[4].color = float3(0.9f, 0.8f, 0.7f);
-	cpu_objects[4].type = CUBE;
-	cpu_objects[4].textureIndex = textureValues[6];
-	cpu_objects[4].textureWidth = textureValues[7];
-	cpu_objects[4].textureHeight = textureValues[8];
-	TRS(&cpu_objects[4], double3(-4, 0, 5), 0.001, double3(0, 1, 0), double3(1, 1, 1));
-	setLorentzBoost(&cpu_objects[4], double3(0.6, 0, 0));
-
-	// Sphere
-	cpu_objects[5].color = float3(1, 1, 1);
-	cpu_objects[5].type = SPHERE;
-	cpu_objects[5].textureIndex = textureValues[0];
-	cpu_objects[5].textureWidth = textureValues[1];
-	cpu_objects[5].textureHeight = textureValues[2];
-	TRS(&cpu_objects[5], double3(0, -1.5, 11), 0, double3(0, 1, 0), double3(1, 1, 1));
-	setLorentzBoost(&cpu_objects[5], double3(0, 0, 0.9));
-
-	// Light
-	cpu_objects[6].color = white_point;
-	cpu_objects[6].type = SPHERE;
-	cpu_objects[6].light = true;
-	TRS(&cpu_objects[6], double3(0, 5, 10), 0, double3(0, 1, 0), double3(0.1, 0.1, 0.1));
-	/*
-	// Pear
-	cpu_objects[5].color = float3(169/255.0, 168/255.0, 54/255.0);
-	cpu_objects[5].type = MESH;
-	cpu_objects[5].meshIndex = theMesh.meshIndices[0];
-
-	// Bunny
-	cpu_objects[6].color = float3(1.0f, 0.2f, 0.9f);
-	cpu_objects[6].type = MESH;
-	cpu_objects[6].meshIndex = theMesh.meshIndices[1];
-	cpu_objects[6].textureIndex = textureValues[3];
-	cpu_objects[6].textureWidth = textureValues[4];
-	cpu_objects[6].textureHeight = textureValues[5];
-	*/
 	
 }
 
@@ -1132,8 +1066,8 @@ void render(){
 
 	cl_double4 cameraLorentz[4];
 	cl_double4 cameraInvLorentz[4];
-	cl_double3 v = double3(0, 0, 0.6);
-	cl_double4 cameraPos = double4(currTime-30, 0, 0, 0);
+	cl_double3 v = double3(0, 0, 0);
+	cl_double4 cameraPos = double4(currTime, 0, 0, 0);
 	Lorentz(cameraLorentz, v);
 	Lorentz(cameraInvLorentz, -v);
 
@@ -1144,7 +1078,6 @@ void render(){
 
 	cl_double3 dir = double3(1, 0, 1);
 	dir = normalize(dir);
-	setLorentzBoost(cpu_objects[0], double3(0.99, 0, 0));
 	setLorentzBoost(cpu_objects[object_count - 2], double3(sqrt(3) / 2, 0, 0));
 
 	for (int i = 0; i < object_count; i++) {
@@ -1169,6 +1102,7 @@ void render(){
 		*/
 	}
 
+	//TRS(&cpu_objects[0], double3(0, -4 + sin(s)*2, 19), 0, double3(0, 1, 0), double3(20, 20, 20));
 	queue.enqueueWriteBuffer(cl_objects, CL_TRUE, 0, object_count * sizeof(Object), cpu_objects);
 
 	kernel.setArg(0, cl_objects);
