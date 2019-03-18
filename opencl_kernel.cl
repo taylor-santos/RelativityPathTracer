@@ -598,7 +598,7 @@ float3 trace(
 	if (!intersect_scene(objects, object_count, interval, vertices, normals, uvs, triangles, octrees, octreeTris, textures, camray, time, &hit))
 		return (float3)(0.15f, 0.15f, 0.25f);
 
-	float3 color = hit.color * ambient;
+	float3 color = hit.color * (interval != 0 ? ambient : 1.0f);
 
 	if (objects[hit.object].light) {
 		color += hit.color;
