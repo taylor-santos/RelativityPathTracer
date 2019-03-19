@@ -4,8 +4,17 @@ A real-time OpenCL path tracer to visualize the optical effects of Special Relat
 ## Usage
 `.\RelativityPathTracer.exe`
 or
-`.\RelativityPathTracer.exe < Scenes/[scene].txt`
+`.\RelativityPathTracer.exe < Scenes\[scene].txt`
 
+## Controls
+`w`, `a`, `s`, `d` to increase camera velocity in a given direction.  
+`q` to add downward velocity to camera.  
+`e` to add upward velocity to camera.  
+`r` to reset camera's velocity.  
+`[space]` to play/pause time. Scenes start paused by default.  
+`i` to toggle light propagation. Scenes start with light propagation enabled by default, but default can be changed on a scene-by-scene basis.  
+
+## Defining a Scene
 When running without a scene file, custom objects may be added using the command line.  
 The following syntax can be used on the command line or piped in from a scene file:  
 1. `O[s|c|m#]`  
@@ -65,6 +74,54 @@ The following syntax can be used on the command line or piped in from a scene fi
    Finalize scene generation, then run the application.
    If the `R` command is given at any point the scene file/command line will stop parsing further input.
    
+## Scenes/Screenshots
+1. `Scenes\arch.txt`  
+    Stationary frame:  
+   ![Stationary view](/Screenshots/arch1.png)  
+   Camera moving towards the arch at 0.95c:  
+   ![Moving view](/Screenshots/arch2.png)  
+   Note that in the moving frame, it seems like the camera has not yet passed through the arch even though the back-side is visible.
+2. `Scenes\bunny.txt`  
+   Stationary frame:  
+   ![Stationary view](/Screenshots/mesh1.png)  
+   This shows off the ray tracer's ability to import and render complex meshes from .obj files
+3. `Scenes\cube.txt`  
+   Stationary frame:  
+   ![Stationary view](/Screenshots/cube1.png)  
+   Moving frame (0.9c to the right) without light propagation:  
+   ![Moving view without light](/Screenshots/cube2.png)  
+   Moving frame (0.9c to the right) with light propagation:  
+   ![Moving view with light](/Screenshots/cube3.png)  
+   With light propagation disabled, length contraction is clearly visible. 
+   When enabled, the cube's apparent shape is changed significantly.
+4. `Scenes\cubes.txt`  
+   ![Cubes gif](/Screenshots/cubes.gif)  
+   This scene shows two identical lines of cubes. One line is stationary with respect to the camera, the other is moving at 0.9c
+5. `Scenes\ladder_paradox.txt`  
+   This scene demonstrates the [Ladder Paradox](https://en.wikipedia.org/wiki/Ladder_paradox).
+   In the stationary frame, a length-contracted ladder (represented by a meter stick) is able to fit inside a garage that is narrower than the ladder's rest length. The garage's front door is able to close, fully enclosing the length-contracted ladder. A few moments later, the garage's back door opens, allowing the ladder to continue moving.  
+   ![Garage frame](/Screenshots/ladder_paradox_garage_frame.gif)  
+   The paradox arises when one considers the ladder's rest frame. In this frame, the ladder is at its maximum length, and the garage is moving towards it at relativistic speeds. Due to length contraction, the garage will be even narrower than before, preventing the stationary ladder from fitting inside.  
+   In reality, this situation is not paradoxical. Due to relativity of simultaneity, the order in which each door opens or closes can differ between reference frames. In the garage frame, the front door closes first, followed by the back door opening. In the ladder frame, as seen below, the back door must first open followed by the front door closing.
+   ![Ladder frame](/Screenshots/ladder_paradox_ladder_frame.gif)  
+6. `Scenes\rulers.txt`  
+   This scene compares two identical rulers, both flashing on for 1 second followed by off for 1 second. The top ruler is moving to the right at 0.9c. The three main effects of special relativity can all be seen: length contraction, time dilation, and relativity of simultaneity.  
+   ![Rulers](/Screenshots/rulers.gif)  
+   Length contraction: The moving ruler is significantly shorter than its stationary counterpart.  
+   Time dilation: The flashes on the moving ruler occur at a lower frequency.  
+   Relativity of simultaneity: The flash occurs simultaneously across the stationary ruler. The moving ruler, however, sees the flash as occuring in a wave travelling from back to front.
+7. `Scenes\shadows.txt`  
+   ![Shadow 1](/Screenshots/shadows1.png)  
+   ![Shadow 2](/Screenshots/shadows2.png)   
+   ![Shadow 3](/Screenshots/shadows4.png)  
+   ![Shadow 4](/Screenshots/shadows5.png)  
+   Shadows take into account the propagation delay of light. As the light source moves through the scene, its shadows are delayed proportionally to their distance from the source.  
+8. `Scenes\soccer.txt`  
+   Stationary sphere:  
+   ![Stationary sphere](/Screenshots/sphere_stationary.png)  
+   Moving sphere:  
+   ![Moving sphere](/Screenshots/sphere_moving.png)  
+   This scene demonstrates the cancelling effect of light propagation on length contraction. Moving spheres, as predicted by Roger Penrose in his 1958 paper titled "The Apparent Shape of a Relativistically Moving Sphere", maintain their circular outline. 
 ## Credits
 * Sam Lampere - [Ray Tracey's Blog: OpenCL path tracing tutorial](http://raytracey.blogspot.com/2016/11/opencl-path-tracing-tutorial-1-firing.html)  
   I used this tutorial as a guide to get the initial OpenCL ray tracing platform working. I have rewritten most of the OpenCL kernel,
