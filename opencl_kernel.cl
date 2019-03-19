@@ -31,6 +31,8 @@ typedef struct Object {
 	int textureWidth;
 	int textureHeight;
 	bool light;
+	float flashPeriod;
+	float flashDuration;
 } Object;
 
 typedef struct Hit {
@@ -102,9 +104,7 @@ float3 applyTranspose(const float4 M[4], const float3 v) {
 }
 
 bool intersect_triangle(const float3 A, const float3 B, const float3 C, const Ray *ray, float *dist, float2 *uv) {
-	/*
-	https://www.scratchapixel.com/lessons/3d-basic-rendering/ray-tracing-rendering-a-triangle/moller-trumbore-ray-triangle-intersection
-    */
+	/* https://www.scratchapixel.com/lessons/3d-basic-rendering/ray-tracing-rendering-a-triangle/moller-trumbore-ray-triangle-intersection */
 	float3 v0v1 = B - A;
 	float3 v0v2 = C - A;
 	float3 pvec = cross(ray->dir, v0v2);
@@ -126,6 +126,7 @@ bool intersect_triangle(const float3 A, const float3 B, const float3 C, const Ra
 }
 
 bool intersect_AABB(const float3 bounds[2], const Ray *ray, float2 *d, int *closeSide, int *farSide) {
+	/* https://tavianator.com/fast-branchless-raybounding-box-intersections-part-2-nans/ */
 	float3 origin = ray->origin;
 	float3 dir = ray->dir;
 	float3 inv_dir = 1.0f / dir;
@@ -357,19 +358,6 @@ bool intersect_sphere(global const Object *objects, const int index, const Ray4D
 	return true;
 }
 
-float modulo(float a, float b) {
-	return (a - b * floor(a / b));
-}
-
-
-float3 EncodeFloatRGB(float v) {
-	float val = 1.0f / (1 + pow(1.1f, -v));
-	float3 enc = (float3)(1.0f, 255.0f, 65025.0f)*val;
-	enc -= floor(enc);
-	enc -= enc.yzz * (float3)(1 / 255.0f, 1 / 255.0f, 0);
-	return enc;
-}
-
 bool intersect_scene(
 	global const Object* objects,
 	const int object_count,
@@ -385,23 +373,19 @@ bool intersect_scene(
 	const float time,
 	Hit *hit
 ) {
-	/* initialise t to a very large number,
-	so t will be guaranteed to be smaller
-	when a hit with the scene occurs */
-
 	float inf = 1e20;
 	hit->dist = inf;
 	bool didHit = false;
 	float4 event = (float)(0, 0, 0, 0);
+
 	/* check if the ray intersects each object in the scene */
 	for (int i = 0; i < object_count; i++) {
 		Hit newHit;
 		newHit.dist = inf;
 		Ray4D newRay;
 		float4 newEvent0 = objects[i].stationaryCam;
-		float4 lightDir = (float4)(interval, normalize(ray->dir)); //Set t=0 for spacelike, set t=-1 for lightlike
+		float4 lightDir = (float4)(interval, normalize(ray->dir));
 		lightDir = transformPoint4D(objects[i].Lorentz, lightDir);
-		//lightDir /= length(lightDir.yzw);
 		newRay.origin = newEvent0;
 		newRay.dir = lightDir;
 
@@ -410,8 +394,6 @@ bool intersect_scene(
 			if (intersect_sphere(objects, i, &newRay, &newHit)) {
 				if (newHit.dist < hit->dist) {
 					event = newEvent0 + lightDir * newHit.dist;
-					//float4 localEvent = transformPoint4D(objects[i].InvLorentz, event);
-					//newHit.dist = length(localEvent.yzw - ray->origin);
 					*hit = newHit;
 					hit->object = i;
 					didHit = true;
@@ -422,8 +404,6 @@ bool intersect_scene(
 			if (intersect_cube(objects, i, &newRay, &newHit)) {
 				if (newHit.dist < hit->dist) {
 					event = newEvent0 + lightDir * newHit.dist;
-					//float4 localEvent = transformPoint4D(objects[i].InvLorentz, event);
-					//newHit.dist = length(localEvent.yzw - ray->origin);
 					*hit = newHit;
 					hit->object = i;
 					didHit = true;
@@ -433,6 +413,7 @@ bool intersect_scene(
 		case MESH:
 			if (intersect_octree(objects, i, vertices, normals, uvs, triangles, octrees, octreeTris, &newRay, &newHit)) {
 				if (newHit.dist < hit->dist) {
+					event = newEvent0 + lightDir * newHit.dist;
 					*hit = newHit;
 					hit->object = i;
 					didHit = true;
@@ -492,22 +473,13 @@ bool intersect_scene(
 			hit->color = objects[hit->object].color;
 		}
 		// Periodic Flash
-		float period = 2;
-		float duration = 0.5f;
-		if (event.x - period * floor(event.x / period) < duration) {
-		//	hit->color += (float3)(0.5f, 0.5f, 0.5f);
+		if (objects[hit->object].flashPeriod > 0) {
+			float period = objects[hit->object].flashPeriod;
+			float duration = objects[hit->object].flashDuration;
+			if (event.x - period * floor(event.x / period) < duration) {
+				hit->color *= 2;
+			}
 		}
-		//hit->color *= 0.95f + 0.05f * (event.x - k * floor(event.x / k))/k;
-		//hit->color *= 1.0f - hit->dist / (hit->dist + 1.0f);
-		/*
-		float d = hit->dist / 1000.0f;
-		int r = d * 255.0f;
-		int g = fmod(d * 255.0f, 1.0f) * 255.0f;
-		int b = fmod(fmod(d * 255.0f, 1.0f) * 255.0f, 1.0f) * 255.0f;
-
-		hit->color = (float3)(r / 255.0f, g / 255.0f, b / 255.0f);
-		*/
-		//hit->color = EncodeFloatRGB(hit->dist);
 		return true;
 	}
 	return false;
@@ -529,24 +501,18 @@ int sample_light(
 	float lightDist,
 	const int lightIndex
 ) {
-	/* initialise t to a very large number,
-	so t will be guaranteed to be smaller
-	when a hit with the scene occurs */
-
 	float inf = 1e20;
 	bool didHit = false;
 	float4 event = (float)(0, 0, 0, 0);
 	/* check if the ray intersects each object in the scene */
 	for (int i = 0; i < object_count; i++) {
 		if (i != lightIndex) {
-
 			Hit newHit;
 			newHit.dist = inf;
 			Ray4D newRay;
 			float4 newEvent0 = transformPoint4D(objects[i].Lorentz, ray->origin);
 			float4 lightDir = (float4)(interval, normalize(ray->dir.yzw));
 			lightDir = transformPoint4D(objects[i].Lorentz, lightDir);
-			//lightDir /= length(lightDir.yzw);
 			newRay.origin = newEvent0;
 			newRay.dir = lightDir;
 
@@ -629,9 +595,6 @@ float3 trace(
 					int shadowIndex = sample_light(objects, object_count, interval, vertices, normals, uvs, triangles, octrees, octreeTris, textures, &newRay, time, length(lightDir.yzw), i);
 					if (shadowIndex == -1) {
 						color += dot(hit.normal, unitLightDir3) / (1.0f + 0.1f * length(lightDir3_ObjFrame) + 0.01f*dot(lightDir3_ObjFrame, lightDir3_ObjFrame)) * hit.color * objects[i].color;
-					}
-					else {
-						//	color += 0.5f * objects[shadowIndex].color;
 					}
 				}
 			}			
