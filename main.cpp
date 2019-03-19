@@ -1,16 +1,4 @@
-// OpenCL ray tracing tutorial by Sam Lapere, 2016
-// http://raytracey.blogspot.com
-
 #include <iostream>
-#include <vector>
-#include <array>
-#include <Windows.h>
-#include <CL\cl.hpp>
-#include <chrono>
-#include <map>
-#include <math.h>
-#include <cstdlib> // strtod
-#include <iomanip> // setprecision
 
 #include "gl_interop.h"
 #include "Vector.h"
