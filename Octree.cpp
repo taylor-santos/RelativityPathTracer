@@ -185,10 +185,10 @@ void Subdivide(Mesh &mesh, int octreeIndex, int minTris, int depth, cl::Context 
 	}
 
 	int numTriangles = trisCount;
-	unsigned char *cpuOutput = new unsigned char[numTriangles];
+	cl_ulong *cpuOutput = new cl_ulong[numTriangles];
 
 	cl::Buffer triIndexBuffer = cl::Buffer(context, CL_MEM_READ_ONLY | CL_MEM_COPY_HOST_PTR, trisCount * sizeof(cl_int), &mesh.octreeTris[trisStart]);
-	cl::Buffer clOutput = cl::Buffer(context, CL_MEM_WRITE_ONLY, numTriangles * sizeof(unsigned char), NULL);
+	cl::Buffer clOutput = cl::Buffer(context, CL_MEM_WRITE_ONLY, numTriangles * sizeof(cl_ulong), NULL);
 
 	cl_float3 min = mesh.octree[octreeIndex].min;
 	cl_float3 max = mesh.octree[octreeIndex].max;
@@ -212,25 +212,32 @@ void Subdivide(Mesh &mesh, int octreeIndex, int minTris, int depth, cl::Context 
 
 	queue.enqueueNDRangeKernel(kernel, NULL, global_work_size, local_work_size);
 
-	queue.enqueueReadBuffer(clOutput, CL_TRUE, 0, numTriangles * sizeof(unsigned char), cpuOutput);
+	queue.enqueueReadBuffer(clOutput, CL_TRUE, 0, numTriangles * sizeof(cl_ulong), cpuOutput);
 
 	for (int x = 0; x < 2; x++) {
 		for (int y = 0; y < 2; y++) {
 			for (int z = 0; z < 2; z++) {
 				Octree child;
+				int childIndex = z + 2 * y + 4 * x;
 				child.min = mesh.octree[octreeIndex].min + ex * x + ey * y + ez * z;
 				child.max = child.min + half_extents;
 
 				child.trisIndex = mesh.octreeTris.size();
 				child.trisCount = 0;
 
-				mesh.octree[octreeIndex].children[z + 2 * y + 4 * x] = mesh.octree.size();
+				mesh.octree[octreeIndex].children[childIndex] = mesh.octree.size();
 				mesh.octree.push_back(child);
+				std::vector<std::vector<unsigned int> > grandchildrenTris(8);
 				for (int tri = 0; tri < trisCount; tri++) {
 					int triIndex = mesh.octreeTris[tri + trisStart];
-					if (cpuOutput[tri] & 1 << z + 2 * y + 4 * x) {
+					if ((cpuOutput[tri] >> 8*childIndex) & 255) {
 						mesh.octreeTris.push_back(triIndex);
 						mesh.octree[mesh.octree.size() - 1].trisCount++;
+						for (int grandchild = 0; grandchild < 8; grandchild++) {
+							if ((cpuOutput[tri] >> 8 * childIndex + grandchild) & 1) {
+								grandchildrenTris[grandchild].push_back(triIndex);
+							}
+						}
 					}
 				}
 			}

@@ -154,21 +154,113 @@ unsigned char AABBTriangleIntersection(__const float3 A, __const float3 B, __con
 	return 1;
 }
 
-__kernel void parallel_add(__global float3* vertices, __global unsigned int* triangles, __global unsigned int* triIndices, __const float3 min, __const float3 max, __global unsigned char* output, __const unsigned int num_triangles) {
+__kernel void parallel_add(__global float3* vertices, __global unsigned int* triangles, __global unsigned int* triIndices, __const float3 min, __const float3 max, __global unsigned long* output, __const unsigned int num_triangles) {
 	const int i = get_global_id(0);
 	if (i >= num_triangles) return;
-	const int triIndex = 3*triIndices[i];
+	const int triIndex = 9*triIndices[i];
 	const float3 A = vertices[triangles[triIndex + 0]],
-		B = vertices[triangles[triIndex + 1]],
-		C = vertices[triangles[triIndex + 2]],
-		center = (min + max) / 2,
-		extent = (max - min) / 2;
-	output[i] = AABBTriangleIntersection(A, B, C, min, center) +
-		(AABBTriangleIntersection(A, B, C, min + (float3)(0, 0, extent.z), center + (float3)(0, 0, extent.z)) * 2) +
-		(AABBTriangleIntersection(A, B, C, min + (float3)(0, extent.y, 0), center + (float3)(0, extent.y, 0)) * 4) +
-		(AABBTriangleIntersection(A, B, C, min + (float3)(0, extent.y, extent.z), center + (float3)(0, extent.y, extent.z)) * 8) +
-		(AABBTriangleIntersection(A, B, C, min + (float3)(extent.x, 0, 0), center + (float3)(extent.x, 0, 0)) * 16) +
-		(AABBTriangleIntersection(A, B, C, min + (float3)(extent.x, 0, extent.z), center + (float3)(extent.x, 0, extent.z)) * 32) +
-		(AABBTriangleIntersection(A, B, C, min + (float3)(extent.x, extent.y, 0), center + (float3)(extent.x, extent.y, 0)) * 64) +
-		(AABBTriangleIntersection(A, B, C, center, max) * 128);
+		B = vertices[triangles[triIndex + 3]],
+		C = vertices[triangles[triIndex + 6]],
+		Center = (min + max) / 2,
+		Extent = (max - min) / 2,
+		extent = (max - min) / 4;
+
+	unsigned long o0 = 0,
+		o1 = 0,
+		o2 = 0,
+		o3 = 0,
+		o4 = 0,
+		o5 = 0,
+		o6 = 0,
+		o7 = 0;
+	float3 half_min = min,
+		half_max = Center;
+	float3 center = (half_min + half_max) / 2;
+	o0 = AABBTriangleIntersection(A, B, C, half_min, center) +
+		(AABBTriangleIntersection(A, B, C, half_min + (float3)(0, 0, extent.z), center + (float3)(0, 0, extent.z)) * 2) +
+		(AABBTriangleIntersection(A, B, C, half_min + (float3)(0, extent.y, 0), center + (float3)(0, extent.y, 0)) * 4) +
+		(AABBTriangleIntersection(A, B, C, half_min + (float3)(0, extent.y, extent.z), center + (float3)(0, extent.y, extent.z)) * 8) +
+		(AABBTriangleIntersection(A, B, C, half_min + (float3)(extent.x, 0, 0), center + (float3)(extent.x, 0, 0)) * 16) +
+		(AABBTriangleIntersection(A, B, C, half_min + (float3)(extent.x, 0, extent.z), center + (float3)(extent.x, 0, extent.z)) * 32) +
+		(AABBTriangleIntersection(A, B, C, half_min + (float3)(extent.x, extent.y, 0), center + (float3)(extent.x, extent.y, 0)) * 64) +
+		(AABBTriangleIntersection(A, B, C, center, half_max) * 128);
+	half_min = min + (float3)(0, 0, Extent.z);
+	half_max = Center + (float3)(0, 0, Extent.z);
+	center = (half_min + half_max) / 2;
+	o1 = AABBTriangleIntersection(A, B, C, half_min, center) +
+		(AABBTriangleIntersection(A, B, C, half_min + (float3)(0, 0, extent.z), center + (float3)(0, 0, extent.z)) * 2) +
+		(AABBTriangleIntersection(A, B, C, half_min + (float3)(0, extent.y, 0), center + (float3)(0, extent.y, 0)) * 4) +
+		(AABBTriangleIntersection(A, B, C, half_min + (float3)(0, extent.y, extent.z), center + (float3)(0, extent.y, extent.z)) * 8) +
+		(AABBTriangleIntersection(A, B, C, half_min + (float3)(extent.x, 0, 0), center + (float3)(extent.x, 0, 0)) * 16) +
+		(AABBTriangleIntersection(A, B, C, half_min + (float3)(extent.x, 0, extent.z), center + (float3)(extent.x, 0, extent.z)) * 32) +
+		(AABBTriangleIntersection(A, B, C, half_min + (float3)(extent.x, extent.y, 0), center + (float3)(extent.x, extent.y, 0)) * 64) +
+		(AABBTriangleIntersection(A, B, C, center, half_max) * 128);
+	half_min = min + (float3)(0, Extent.y, 0);
+	half_max = Center + (float3)(0, Extent.y, 0);
+	center = (half_min + half_max) / 2;
+	o2 = AABBTriangleIntersection(A, B, C, half_min, center) +
+		(AABBTriangleIntersection(A, B, C, half_min + (float3)(0, 0, extent.z), center + (float3)(0, 0, extent.z)) * 2) +
+		(AABBTriangleIntersection(A, B, C, half_min + (float3)(0, extent.y, 0), center + (float3)(0, extent.y, 0)) * 4) +
+		(AABBTriangleIntersection(A, B, C, half_min + (float3)(0, extent.y, extent.z), center + (float3)(0, extent.y, extent.z)) * 8) +
+		(AABBTriangleIntersection(A, B, C, half_min + (float3)(extent.x, 0, 0), center + (float3)(extent.x, 0, 0)) * 16) +
+		(AABBTriangleIntersection(A, B, C, half_min + (float3)(extent.x, 0, extent.z), center + (float3)(extent.x, 0, extent.z)) * 32) +
+		(AABBTriangleIntersection(A, B, C, half_min + (float3)(extent.x, extent.y, 0), center + (float3)(extent.x, extent.y, 0)) * 64) +
+		(AABBTriangleIntersection(A, B, C, center, half_max) * 128);
+	half_min = min + (float3)(0, Extent.y, Extent.z);
+	half_max = Center + (float3)(0, Extent.y, Extent.z);
+	center = (half_min + half_max) / 2;
+	o3 = AABBTriangleIntersection(A, B, C, half_min, center) +
+		(AABBTriangleIntersection(A, B, C, half_min + (float3)(0, 0, extent.z), center + (float3)(0, 0, extent.z)) * 2) +
+		(AABBTriangleIntersection(A, B, C, half_min + (float3)(0, extent.y, 0), center + (float3)(0, extent.y, 0)) * 4) +
+		(AABBTriangleIntersection(A, B, C, half_min + (float3)(0, extent.y, extent.z), center + (float3)(0, extent.y, extent.z)) * 8) +
+		(AABBTriangleIntersection(A, B, C, half_min + (float3)(extent.x, 0, 0), center + (float3)(extent.x, 0, 0)) * 16) +
+		(AABBTriangleIntersection(A, B, C, half_min + (float3)(extent.x, 0, extent.z), center + (float3)(extent.x, 0, extent.z)) * 32) +
+		(AABBTriangleIntersection(A, B, C, half_min + (float3)(extent.x, extent.y, 0), center + (float3)(extent.x, extent.y, 0)) * 64) +
+		(AABBTriangleIntersection(A, B, C, center, half_max) * 128);
+	half_min = min + (float3)(Extent.x, 0, 0);
+	half_max = Center + (float3)(Extent.x, 0, 0);
+	center = (half_min + half_max) / 2;
+	o4 = AABBTriangleIntersection(A, B, C, half_min, center) +
+		(AABBTriangleIntersection(A, B, C, half_min + (float3)(0, 0, extent.z), center + (float3)(0, 0, extent.z)) * 2) +
+		(AABBTriangleIntersection(A, B, C, half_min + (float3)(0, extent.y, 0), center + (float3)(0, extent.y, 0)) * 4) +
+		(AABBTriangleIntersection(A, B, C, half_min + (float3)(0, extent.y, extent.z), center + (float3)(0, extent.y, extent.z)) * 8) +
+		(AABBTriangleIntersection(A, B, C, half_min + (float3)(extent.x, 0, 0), center + (float3)(extent.x, 0, 0)) * 16) +
+		(AABBTriangleIntersection(A, B, C, half_min + (float3)(extent.x, 0, extent.z), center + (float3)(extent.x, 0, extent.z)) * 32) +
+		(AABBTriangleIntersection(A, B, C, half_min + (float3)(extent.x, extent.y, 0), center + (float3)(extent.x, extent.y, 0)) * 64) +
+		(AABBTriangleIntersection(A, B, C, center, half_max) * 128);
+	half_min = min + (float3)(Extent.x, 0, Extent.z);
+	half_max = Center + (float3)(Extent.x, 0, Extent.z);
+	center = (half_min + half_max) / 2;
+	o5 = AABBTriangleIntersection(A, B, C, half_min, center) +
+		(AABBTriangleIntersection(A, B, C, half_min + (float3)(0, 0, extent.z), center + (float3)(0, 0, extent.z)) * 2) +
+		(AABBTriangleIntersection(A, B, C, half_min + (float3)(0, extent.y, 0), center + (float3)(0, extent.y, 0)) * 4) +
+		(AABBTriangleIntersection(A, B, C, half_min + (float3)(0, extent.y, extent.z), center + (float3)(0, extent.y, extent.z)) * 8) +
+		(AABBTriangleIntersection(A, B, C, half_min + (float3)(extent.x, 0, 0), center + (float3)(extent.x, 0, 0)) * 16) +
+		(AABBTriangleIntersection(A, B, C, half_min + (float3)(extent.x, 0, extent.z), center + (float3)(extent.x, 0, extent.z)) * 32) +
+		(AABBTriangleIntersection(A, B, C, half_min + (float3)(extent.x, extent.y, 0), center + (float3)(extent.x, extent.y, 0)) * 64) +
+		(AABBTriangleIntersection(A, B, C, center, half_max) * 128);
+	half_min = min + (float3)(Extent.x, Extent.y, 0);
+	half_max = Center + (float3)(Extent.x, Extent.y, 0);
+	center = (half_min + half_max) / 2;
+	o6 = AABBTriangleIntersection(A, B, C, half_min, center) +
+		(AABBTriangleIntersection(A, B, C, half_min + (float3)(0, 0, extent.z), center + (float3)(0, 0, extent.z)) * 2) +
+		(AABBTriangleIntersection(A, B, C, half_min + (float3)(0, extent.y, 0), center + (float3)(0, extent.y, 0)) * 4) +
+		(AABBTriangleIntersection(A, B, C, half_min + (float3)(0, extent.y, extent.z), center + (float3)(0, extent.y, extent.z)) * 8) +
+		(AABBTriangleIntersection(A, B, C, half_min + (float3)(extent.x, 0, 0), center + (float3)(extent.x, 0, 0)) * 16) +
+		(AABBTriangleIntersection(A, B, C, half_min + (float3)(extent.x, 0, extent.z), center + (float3)(extent.x, 0, extent.z)) * 32) +
+		(AABBTriangleIntersection(A, B, C, half_min + (float3)(extent.x, extent.y, 0), center + (float3)(extent.x, extent.y, 0)) * 64) +
+		(AABBTriangleIntersection(A, B, C, center, half_max) * 128);
+	half_min = Center;
+	half_max = max;
+	center = (half_min + half_max) / 2;
+	o7 = AABBTriangleIntersection(A, B, C, half_min, center) +
+		(AABBTriangleIntersection(A, B, C, half_min + (float3)(0, 0, extent.z), center + (float3)(0, 0, extent.z)) * 2) +
+		(AABBTriangleIntersection(A, B, C, half_min + (float3)(0, extent.y, 0), center + (float3)(0, extent.y, 0)) * 4) +
+		(AABBTriangleIntersection(A, B, C, half_min + (float3)(0, extent.y, extent.z), center + (float3)(0, extent.y, extent.z)) * 8) +
+		(AABBTriangleIntersection(A, B, C, half_min + (float3)(extent.x, 0, 0), center + (float3)(extent.x, 0, 0)) * 16) +
+		(AABBTriangleIntersection(A, B, C, half_min + (float3)(extent.x, 0, extent.z), center + (float3)(extent.x, 0, extent.z)) * 32) +
+		(AABBTriangleIntersection(A, B, C, half_min + (float3)(extent.x, extent.y, 0), center + (float3)(extent.x, extent.y, 0)) * 64) +
+		(AABBTriangleIntersection(A, B, C, center, half_max) * 128);
+
+	output[i] = o0 + 256 * (o1 + 256 * (o2 + 256 * (o3 + 256 * (o4 + 256 * (o5 + 256 * (o6 + 256 * o7))))));
 }
