@@ -21,8 +21,8 @@ extern std::vector<cl::Memory> cl_vbos;
 
 void pickPlatform(cl::Platform& platform, const std::vector<cl::Platform>& platforms);
 void pickDevice(cl::Device& device, const std::vector<cl::Device>& devices);
-void initOpenCL();
-void initCLKernel();
+void initOpenCL(std::string filename);
+void initRelativityKernel();
 void runKernel();
 
 void cleanUp();

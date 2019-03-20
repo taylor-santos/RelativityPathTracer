@@ -1,3 +1,5 @@
+#define __CL_ENABLE_EXCEPTIONS
+
 #include "Render.h"
 #include "gl_interop.h"
 #include "CLSetup.h"
@@ -199,7 +201,9 @@ void render() {
 		);
 	}
 
-	queue.enqueueWriteBuffer(cl_objects, CL_TRUE, 0, cpu_objects.size() * sizeof(Object), cpu_objects.size() > 0 ? &cpu_objects[0] : NULL);
+	if (cpu_objects.size() > 0) {
+		queue.enqueueWriteBuffer(cl_objects, CL_TRUE, 0, cpu_objects.size() * sizeof(Object), &cpu_objects[0]);
+	}
 	kernel.setArg(0, cl_objects);
 
 	runKernel();
@@ -411,8 +415,6 @@ void inputScene() {
 			object.meshIndex = theMesh.meshIndices[index];
 		}
 	}
-
-	queue.enqueueWriteBuffer(cl_objects, CL_TRUE, 0, cpu_objects.size() * sizeof(Object), cpu_objects.size() > 0 ? &cpu_objects[0] : NULL);
 }
 
 bool ReadTexture(std::string path) {

@@ -1,3 +1,5 @@
+#define __CL_ENABLE_EXCEPTIONS
+
 #include "CLSetup.h"
 #include "Object.h"
 #include "Render.h"
@@ -61,7 +63,7 @@ void pickDevice(cl::Device& device, const std::vector<cl::Device>& devices) {
 	}
 }
 
-void initOpenCL()
+void initOpenCL(std::string filename)
 {
 	// Get all available OpenCL platforms (e.g. AMD OpenCL, Nvidia CUDA, Intel OpenCL)
 	std::vector<cl::Platform> platforms;
@@ -108,7 +110,13 @@ void initOpenCL()
 		0
 	};
 
-	context = cl::Context(device, properties);
+	try {
+		context = cl::Context({device}, properties);
+	}
+	catch (cl::Error &e) {
+		std::cerr << e.what() << ": " << e.err() << std::endl;
+		throw e;
+	}
 
 	// Create a command queue
 	queue = cl::CommandQueue(context, device);
@@ -116,7 +124,7 @@ void initOpenCL()
 
 	// Convert the OpenCL source code to a string// Convert the OpenCL source code to a string
 
-	std::ifstream file("opencl_kernel.cl");
+	std::ifstream file(filename);
 	if (!file) {
 		std::cout << "\nNo OpenCL file found!" << std::endl << "Exiting..." << std::endl;
 		system("PAUSE");
@@ -136,7 +144,7 @@ void initOpenCL()
 
 
 
-void initCLKernel() {
+void initRelativityKernel() {
 
 	// pick a rendermode
 	unsigned int rendermode = 1;
@@ -168,7 +176,14 @@ void runKernel() {
 	// every pixel in the image has its own thread or "work item",
 	// so the total amount of work items equals the number of pixels
 	std::size_t global_work_size = window_width * window_height;
-	std::size_t local_work_size = kernel.getWorkGroupInfo<CL_KERNEL_WORK_GROUP_SIZE>(device);
+	std::size_t local_work_size;
+	try {
+		local_work_size = kernel.getWorkGroupInfo<CL_KERNEL_WORK_GROUP_SIZE>(device);
+	}
+	catch (cl::Error &e) {
+		std::cerr << e.what() << ": " << e.err() << std::endl;
+		throw e;
+	}
 
 	// Ensure the global work size is a multiple of local work size
 	if (global_work_size % local_work_size != 0)

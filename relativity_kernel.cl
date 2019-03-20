@@ -658,3 +658,8 @@ __kernel void render_kernel(
 	/* store the pixelcolour in the output buffer */
 	output[work_item_id] = (float3)(x_coord, y_coord, fcolour.c);
 }
+
+__kernel void add_single(global const int* v1, global const int* v2, global int* v3) { 
+	int ID = get_global_id(0);
+	v3[ID] = v1[ID] + v2[ID];
+}
