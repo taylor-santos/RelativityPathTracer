@@ -26,6 +26,7 @@ void main(int argc, char** argv) {
 		std::queue<vector<unsigned int>> trisQueue;
 		std::queue<vector<unsigned int>> trisIndexQueue;
 		std::queue<unsigned int> octreeIndexQueue;
+		std::queue<unsigned int> depthQueue;
 
 		vector<unsigned int> triVerts(triangles.size() / 3);
 		vector<unsigned int> triIndex(triangles.size() / 9);
@@ -38,6 +39,7 @@ void main(int argc, char** argv) {
 		trisQueue.push(triVerts);
 		trisIndexQueue.push(triIndex);
 		octreeIndexQueue.push(0);
+		depthQueue.push(15);
 
 		vector<Platform> platforms;
 		Platform::get(&platforms);
@@ -67,8 +69,13 @@ void main(int argc, char** argv) {
 		while (!trisQueue.empty()) {
 			vector<unsigned int> newTriangles = trisQueue.front();
 			trisQueue.pop();
+			vector<unsigned int> newTriIndices = trisIndexQueue.front();
+			trisIndexQueue.pop();
 			unsigned int octreeIndex = octreeIndexQueue.front();
 			octreeIndexQueue.pop();
+			unsigned int depth = depthQueue.front();
+			depthQueue.pop();
+			
 			int numTriangles = newTriangles.size() / 3;
 			unsigned char *cpuOutput = new unsigned char[numTriangles];
 
@@ -110,11 +117,22 @@ void main(int argc, char** argv) {
 						child.trisCount = 0;
 						theMesh.octree[octreeIndex].children[z + 2 * y + 4 * x] = theMesh.octree.size();
 						theMesh.octree.push_back(child);
+						vector<unsigned int> nextTris, nextTriIndices;
 						for (int tri = 0; tri < numTriangles; tri++) {
 							if (cpuOutput[tri] & 1 << z + 2 * y + 4 * x) {
-								theMesh.octreeTris.push_back(tri);
+								theMesh.octreeTris.push_back(newTriIndices[tri]);
 								theMesh.octree[theMesh.octree.size() - 1].trisCount++;
+								nextTris.push_back(newTriangles[3 * tri + 0]);
+								nextTris.push_back(newTriangles[3 * tri + 1]);
+								nextTris.push_back(newTriangles[3 * tri + 2]);
+								nextTriIndices.push_back(newTriIndices[tri]);
 							}
+						}
+						if (nextTriIndices.size() > 10 && depth > 0) {
+							trisQueue.push(nextTris);
+							trisIndexQueue.push(nextTriIndices);
+							octreeIndexQueue.push(theMesh.octree.size() - 1);
+							depthQueue.push(depth - 1);
 						}
 					}
 				}
