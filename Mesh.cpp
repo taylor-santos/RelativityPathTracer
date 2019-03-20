@@ -17,5 +17,5 @@ void Mesh::GenerateOctree(int firstTriIndex) {
 	}
 	int octreeIndex = octree.size();
 	octree.push_back(newOctree);
-	Subdivide(*this, octreeIndex, 0, 15);
+	//Subdivide(*this, octreeIndex, 0, 15);
 }

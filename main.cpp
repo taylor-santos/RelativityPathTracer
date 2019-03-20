@@ -1,5 +1,6 @@
 #define __CL_ENABLE_EXCEPTIONS
 #include <iostream>
+#include <queue>
 
 #include "gl_interop.h"
 #include "Vector.h"
@@ -18,6 +19,25 @@ void main(int argc, char** argv) {
 	for (const int meshIndex : theMesh.meshIndices) {
 		using namespace std;
 		using namespace cl;
+
+		vector<cl_float3> vertices = theMesh.vertices;
+		vector<unsigned int> triangles = theMesh.triangles;
+
+		std::queue<vector<unsigned int>> trisQueue;
+		std::queue<vector<unsigned int>> trisIndexQueue;
+		std::queue<unsigned int> octreeIndexQueue;
+
+		vector<unsigned int> triVerts(triangles.size() / 3);
+		vector<unsigned int> triIndex(triangles.size() / 9);
+		int count = 0, n = 3;
+		copy_if(triangles.begin(), triangles.end(), triVerts.begin(),
+			[&count, &n](int i)->bool { return count++ % n == 0; });
+		for (int i = 0; i < triIndex.size(); i++) {
+			triIndex[i] = 9 * i;
+		}
+		trisQueue.push(triVerts);
+		trisIndexQueue.push(triIndex);
+		octreeIndexQueue.push(0);
 
 		vector<Platform> platforms;
 		Platform::get(&platforms);
@@ -44,35 +64,64 @@ void main(int argc, char** argv) {
 
 		Kernel kernel = Kernel(program, "parallel_add");
 
-		const int numElements = 10000;
-		float cpuArrayA[numElements];
-		float cpuArrayB[numElements];
-		float cpuOutput[numElements] = {}; 
+		while (!trisQueue.empty()) {
+			vector<unsigned int> newTriangles = trisQueue.front();
+			trisQueue.pop();
+			unsigned int octreeIndex = octreeIndexQueue.front();
+			octreeIndexQueue.pop();
+			int numTriangles = newTriangles.size() / 3;
+			unsigned char *cpuOutput = new unsigned char[numTriangles];
 
-		fill(cpuArrayA, cpuArrayA + numElements, 1.0f);
-		fill(cpuArrayB, cpuArrayB + numElements, 2.0f);
+			Buffer vertBuffer = Buffer(context, CL_MEM_READ_ONLY | CL_MEM_COPY_HOST_PTR, vertices.size() * sizeof(cl_float3), &vertices[0]);
+			Buffer triBuffer = Buffer(context, CL_MEM_READ_ONLY | CL_MEM_COPY_HOST_PTR, newTriangles.size() * sizeof(unsigned int), &newTriangles[0]);
+			Buffer clOutput = Buffer(context, CL_MEM_WRITE_ONLY, numTriangles * sizeof(unsigned char), NULL);
 
-		Buffer clBufferA = Buffer(context, CL_MEM_READ_ONLY | CL_MEM_COPY_HOST_PTR, numElements * sizeof(cl_int), cpuArrayA);
-		Buffer clBufferB = Buffer(context, CL_MEM_READ_ONLY | CL_MEM_COPY_HOST_PTR, numElements * sizeof(cl_int), cpuArrayB);
-		Buffer clOutput = Buffer(context, CL_MEM_WRITE_ONLY, numElements * sizeof(cl_int), NULL);
+			cl_float3 min = theMesh.octree[0].min;
+			cl_float3 max = theMesh.octree[0].max;
+			cl_float3 extents = max - min;
+			cl_float3 half_extents = extents / 2;
+			cl_float3 ex = float3(half_extents.x, 0, 0);
+			cl_float3 ey = float3(0, half_extents.y, 0);
+			cl_float3 ez = float3(0, 0, half_extents.z);
 
-		kernel.setArg(0, clBufferA); // first argument 
-		kernel.setArg(1, clBufferB); // second argument 
-		kernel.setArg(2, clOutput);  // third argument 
+			kernel.setArg(0, vertBuffer);
+			kernel.setArg(1, triBuffer);
+			kernel.setArg(2, min);
+			kernel.setArg(3, max);
+			kernel.setArg(4, clOutput);
+			kernel.setArg(5, numTriangles);
+			CommandQueue queue = CommandQueue(context, device);
 
-		CommandQueue queue = CommandQueue(context, device);
+			std::size_t global_work_size = numTriangles;
+			std::size_t local_work_size = kernel.getWorkGroupInfo<CL_KERNEL_WORK_GROUP_SIZE>(device);
+			if (global_work_size % local_work_size != 0)
+				global_work_size = (global_work_size / local_work_size + 1) * local_work_size;
 
-		std::size_t global_work_size = numElements;
-		std::size_t local_work_size = kernel.getWorkGroupInfo<CL_KERNEL_WORK_GROUP_SIZE>(device); // could also be 1, 2 or 5 in this example
-		if (global_work_size % local_work_size != 0)
-			global_work_size = (global_work_size / local_work_size + 1) * local_work_size;
+			queue.enqueueNDRangeKernel(kernel, NULL, global_work_size, local_work_size);
 
-		queue.enqueueNDRangeKernel(kernel, NULL, global_work_size, local_work_size);
-
-		queue.enqueueReadBuffer(clOutput, CL_TRUE, 0, numElements * sizeof(cl_float), cpuOutput);
+			queue.enqueueReadBuffer(clOutput, CL_TRUE, 0, numTriangles * sizeof(unsigned char), cpuOutput);
+			for (int x = 0; x < 2; x++) {
+				for (int y = 0; y < 2; y++) {
+					for (int z = 0; z < 2; z++) {
+						Octree child;
+						child.min = theMesh.octree[octreeIndex].min + ex * x + ey * y + ez * z;
+						child.max = child.min + half_extents;
+						child.trisIndex = theMesh.octreeTris.size();
+						child.trisCount = 0;
+						theMesh.octree[octreeIndex].children[z + 2 * y + 4 * x] = theMesh.octree.size();
+						theMesh.octree.push_back(child);
+						for (int tri = 0; tri < numTriangles; tri++) {
+							if (cpuOutput[tri] & 1 << z + 2 * y + 4 * x) {
+								theMesh.octreeTris.push_back(tri);
+								theMesh.octree[theMesh.octree.size() - 1].trisCount++;
+							}
+						}
+					}
+				}
+			}
+			delete[] cpuOutput;
+		}
 	}
-
-
 
 	// initialise OpenGL (GLEW and GLUT window + callback functions)
 	initGL(argc, argv);
