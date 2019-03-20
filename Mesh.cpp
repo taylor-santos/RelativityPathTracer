@@ -1,6 +1,7 @@
 #include "Mesh.h"
 #include <fstream>
 #include <iostream>
+#include <chrono>
 
 void Mesh::GenerateOctree(int firstTriIndex) {
 	Octree newOctree;
@@ -50,5 +51,9 @@ void Mesh::GenerateOctree(int firstTriIndex) {
 	kernel.setArg(0, vertBuffer);
 	kernel.setArg(1, triBuffer);
 
-	Subdivide(*this, octreeIndex, 0, 10, context, kernel, device);
+	auto clock_start = std::chrono::high_resolution_clock::now();
+	Subdivide(*this, octreeIndex, 0, 5, context, kernel, device);
+	auto clock_end = std::chrono::high_resolution_clock::now();
+	int ms = std::chrono::duration_cast<std::chrono::milliseconds>(clock_end - clock_start).count();
+	std::cout << "Octree generated in " << ms << "ms" << std::endl;
 }

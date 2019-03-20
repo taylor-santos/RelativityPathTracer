@@ -67,45 +67,15 @@ void json(Mesh const& mesh, const unsigned int octreeIndex, std::ostream &out, c
 void main(int argc, char** argv) {
 
 	inputScene();
-	std::ofstream file("parallel.json");
-	json(theMesh, 0, file, 0);
-	file.close();
+	//std::ofstream file("parallel.json");
+	//json(theMesh, 0, file, 0);
+	//file.close();
 	// initialise OpenGL (GLEW and GLUT window + callback functions)
 	initGL(argc, argv);
 	
 	// initialise OpenCL
 	initOpenCL("relativity_kernel.cl");
-	/*
-	const int n = 1000000;
-	cl::Buffer buffer_A(context, CL_MEM_READ_WRITE, sizeof(int) * n);
-	cl::Buffer buffer_B(context, CL_MEM_READ_WRITE, sizeof(int) * n);
-	cl::Buffer buffer_C(context, CL_MEM_READ_WRITE, sizeof(int) * n);
-	int *A = new int[n];
-	int *B = new int[n];
-	int *C = new int[n];
-	std::fill(A, A + n, 1);
-	std::fill(B, B + n, 2);
-	queue.enqueueWriteBuffer(buffer_A, CL_TRUE, 0, sizeof(int)*n, A);
-	queue.enqueueWriteBuffer(buffer_B, CL_TRUE, 0, sizeof(int)*n, B);
-	cl::Kernel add;
-	try {
-		add = cl::Kernel(program, "add2");
-	}
-	catch (cl::Error &e) {
-		std::cerr << e.what() << ": " << e.err() << std::endl;
-		throw e;
-	}
-	std::size_t global_work_size = n;
-	std::size_t local_work_size;
-	try {
-		//std::size_t local_work_size = kernel.getWorkGroupInfo<CL_KERNEL_WORK_GROUP_SIZE>(device);
-		kernel.getWorkGroupInfo<CL_KERNEL_WORK_GROUP_SIZE>(device);
-	}
-	catch (cl::Error &e) {
-		std::cerr << e.what() << ": " << e.err() << std::endl;
-		throw e;
-	}
-	*/
+	
 	// create vertex buffer object
 	createVBO(&vbo);
 
