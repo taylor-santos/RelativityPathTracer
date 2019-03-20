@@ -168,13 +168,8 @@ bool AABBTriangleIntersection(Mesh const& mesh, int octreeIndex, int triIndex) {
 	return true;
 }
 
-void Subdivide(Mesh &mesh, int octreeIndex, int minTris, int depth) {
+void Subdivide(Mesh &mesh, int octreeIndex, int minTris, int depth, cl::Context &context, cl::Kernel &kernel, cl::Device &device) {
 	if (depth <= 0 || mesh.octree[octreeIndex].trisCount <= minTris) return;
-	cl_float3 extents = mesh.octree[octreeIndex].max - mesh.octree[octreeIndex].min;
-	cl_float3 half_extents = extents / 2;
-	cl_float3 ex = float3(half_extents.x, 0, 0);
-	cl_float3 ey = float3(0, half_extents.y, 0);
-	cl_float3 ez = float3(0, 0, half_extents.z);
 	int trisStart = mesh.octree[octreeIndex].trisIndex;
 	int trisCount = mesh.octree[octreeIndex].trisCount;
 	std::map<int, int> trisPerVertex;
@@ -188,6 +183,37 @@ void Subdivide(Mesh &mesh, int octreeIndex, int minTris, int depth) {
 		maxTrisPerVertex = max(maxTrisPerVertex, trisPerVertex[mesh.triangles[9 * triIndex + 3 * 1]]);
 		maxTrisPerVertex = max(maxTrisPerVertex, trisPerVertex[mesh.triangles[9 * triIndex + 3 * 2]]);
 	}
+
+	int numTriangles = trisCount;
+	unsigned char *cpuOutput = new unsigned char[numTriangles];
+
+	cl::Buffer triIndexBuffer = cl::Buffer(context, CL_MEM_READ_ONLY | CL_MEM_COPY_HOST_PTR, trisCount * sizeof(cl_int), &mesh.octreeTris[trisStart]);
+	cl::Buffer clOutput = cl::Buffer(context, CL_MEM_WRITE_ONLY, numTriangles * sizeof(unsigned char), NULL);
+
+	cl_float3 min = mesh.octree[octreeIndex].min;
+	cl_float3 max = mesh.octree[octreeIndex].max;
+	cl_float3 extents = max - min;
+	cl_float3 half_extents = extents / 2;
+	cl_float3 ex = float3(half_extents.x, 0, 0);
+	cl_float3 ey = float3(0, half_extents.y, 0);
+	cl_float3 ez = float3(0, 0, half_extents.z);
+
+	kernel.setArg(2, triIndexBuffer);
+	kernel.setArg(3, min);
+	kernel.setArg(4, max);
+	kernel.setArg(5, clOutput);
+	kernel.setArg(6, numTriangles);
+	cl::CommandQueue queue = cl::CommandQueue(context, device);
+
+	std::size_t global_work_size = numTriangles;
+	std::size_t local_work_size = kernel.getWorkGroupInfo<CL_KERNEL_WORK_GROUP_SIZE>(device);
+	if (global_work_size % local_work_size != 0)
+		global_work_size = (global_work_size / local_work_size + 1) * local_work_size;
+
+	queue.enqueueNDRangeKernel(kernel, NULL, global_work_size, local_work_size);
+
+	queue.enqueueReadBuffer(clOutput, CL_TRUE, 0, numTriangles * sizeof(unsigned char), cpuOutput);
+
 	for (int x = 0; x < 2; x++) {
 		for (int y = 0; y < 2; y++) {
 			for (int z = 0; z < 2; z++) {
@@ -200,9 +226,9 @@ void Subdivide(Mesh &mesh, int octreeIndex, int minTris, int depth) {
 
 				mesh.octree[octreeIndex].children[z + 2 * y + 4 * x] = mesh.octree.size();
 				mesh.octree.push_back(child);
-				for (int tri = trisStart; tri < trisStart + trisCount; tri++) {
-					int triIndex = mesh.octreeTris[tri];
-					if (AABBTriangleIntersection(mesh, mesh.octree.size() - 1, triIndex)) {
+				for (int tri = 0; tri < trisCount; tri++) {
+					int triIndex = mesh.octreeTris[tri + trisStart];
+					if (cpuOutput[tri] & 1 << z + 2 * y + 4 * x) {
 						mesh.octreeTris.push_back(triIndex);
 						mesh.octree[mesh.octree.size() - 1].trisCount++;
 					}
@@ -210,6 +236,7 @@ void Subdivide(Mesh &mesh, int octreeIndex, int minTris, int depth) {
 			}
 		}
 	}
+	delete[] cpuOutput;
 	for (int x = 0; x < 2; x++) {
 		for (int y = 0; y < 2; y++) {
 			for (int z = 0; z < 2; z++) {
@@ -243,6 +270,6 @@ void Subdivide(Mesh &mesh, int octreeIndex, int minTris, int depth) {
 		}
 	}
 	for (int i = 0; i < 8; i++) {
-		Subdivide(mesh, mesh.octree[octreeIndex].children[i], maxTrisPerVertex, depth - 1);
+		Subdivide(mesh, mesh.octree[octreeIndex].children[i], maxTrisPerVertex, depth - 1, context, kernel, device);
 	}
 }

@@ -12,4 +12,4 @@ struct Octree
 };
 
 bool AABBTriangleIntersection(struct Mesh const& mesh, int octreeIndex, int triIndex);
-void Subdivide(struct Mesh &mesh, int octreeIndex, int minTris, int depth);
+void Subdivide(Mesh &mesh, int octreeIndex, int minTris, int depth, cl::Context &context, cl::Kernel &kernel, cl::Device &device);

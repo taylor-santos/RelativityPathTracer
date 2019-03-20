@@ -154,10 +154,10 @@ unsigned char AABBTriangleIntersection(__const float3 A, __const float3 B, __con
 	return 1;
 }
 
-__kernel void parallel_add(__global float3* vertices, __global unsigned int* triangles, __const float3 min, __const float3 max, __global unsigned char* output, __const unsigned int num_triangles) {
+__kernel void parallel_add(__global float3* vertices, __global unsigned int* triangles, __global unsigned int* triIndices, __const float3 min, __const float3 max, __global unsigned char* output, __const unsigned int num_triangles) {
 	const int i = get_global_id(0);
 	if (i >= num_triangles) return;
-	const int triIndex = 3*i;
+	const int triIndex = 3*triIndices[i];
 	const float3 A = vertices[triangles[triIndex + 0]],
 		B = vertices[triangles[triIndex + 1]],
 		C = vertices[triangles[triIndex + 2]],
