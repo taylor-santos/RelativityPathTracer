@@ -168,28 +168,7 @@ bool AABBTriangleIntersection(Mesh const& mesh, int octreeIndex, int triIndex) {
 	return true;
 }
 
-void Subdivide(Mesh &mesh, int octreeIndex, int minTris, int depth, cl::Context &context, cl::Kernel &kernel, cl::Device &device) {
-	if (depth <= 0 || mesh.octree[octreeIndex].trisCount <= minTris) return;
-	int trisStart = mesh.octree[octreeIndex].trisIndex;
-	int trisCount = mesh.octree[octreeIndex].trisCount;
-	std::map<int, int> trisPerVertex;
-	int maxTrisPerVertex = 0;
-	for (int tri = trisStart; tri < trisStart + trisCount; tri++) {
-		int triIndex = mesh.octreeTris[tri];
-		trisPerVertex[mesh.triangles[9 * triIndex + 3 * 0]]++;
-		trisPerVertex[mesh.triangles[9 * triIndex + 3 * 1]]++;
-		trisPerVertex[mesh.triangles[9 * triIndex + 3 * 2]]++;
-		maxTrisPerVertex = max(maxTrisPerVertex, trisPerVertex[mesh.triangles[9 * triIndex + 3 * 0]]);
-		maxTrisPerVertex = max(maxTrisPerVertex, trisPerVertex[mesh.triangles[9 * triIndex + 3 * 1]]);
-		maxTrisPerVertex = max(maxTrisPerVertex, trisPerVertex[mesh.triangles[9 * triIndex + 3 * 2]]);
-	}
-
-	int numTriangles = trisCount;
-	cl_ulong *cpuOutput = new cl_ulong[numTriangles];
-
-	cl::Buffer triIndexBuffer = cl::Buffer(context, CL_MEM_READ_ONLY | CL_MEM_COPY_HOST_PTR, trisCount * sizeof(cl_int), &mesh.octreeTris[trisStart]);
-	cl::Buffer clOutput = cl::Buffer(context, CL_MEM_WRITE_ONLY, numTriangles * sizeof(cl_ulong), NULL);
-
+int SplitChildren(Mesh &mesh, int octreeIndex) {
 	cl_float3 min = mesh.octree[octreeIndex].min;
 	cl_float3 max = mesh.octree[octreeIndex].max;
 	cl_float3 extents = max - min;
@@ -197,23 +176,6 @@ void Subdivide(Mesh &mesh, int octreeIndex, int minTris, int depth, cl::Context 
 	cl_float3 ex = float3(half_extents.x, 0, 0);
 	cl_float3 ey = float3(0, half_extents.y, 0);
 	cl_float3 ez = float3(0, 0, half_extents.z);
-
-	kernel.setArg(2, triIndexBuffer);
-	kernel.setArg(3, min);
-	kernel.setArg(4, max);
-	kernel.setArg(5, clOutput);
-	kernel.setArg(6, numTriangles);
-	cl::CommandQueue queue = cl::CommandQueue(context, device);
-
-	std::size_t global_work_size = numTriangles;
-	std::size_t local_work_size = kernel.getWorkGroupInfo<CL_KERNEL_WORK_GROUP_SIZE>(device);
-	if (global_work_size % local_work_size != 0)
-		global_work_size = (global_work_size / local_work_size + 1) * local_work_size;
-
-	queue.enqueueNDRangeKernel(kernel, NULL, global_work_size, local_work_size);
-
-	queue.enqueueReadBuffer(clOutput, CL_TRUE, 0, numTriangles * sizeof(cl_ulong), cpuOutput);
-
 	for (int x = 0; x < 2; x++) {
 		for (int y = 0; y < 2; y++) {
 			for (int z = 0; z < 2; z++) {
@@ -221,29 +183,13 @@ void Subdivide(Mesh &mesh, int octreeIndex, int minTris, int depth, cl::Context 
 				int childIndex = z + 2 * y + 4 * x;
 				child.min = mesh.octree[octreeIndex].min + ex * x + ey * y + ez * z;
 				child.max = child.min + half_extents;
-
 				child.trisIndex = mesh.octreeTris.size();
 				child.trisCount = 0;
-
 				mesh.octree[octreeIndex].children[childIndex] = mesh.octree.size();
 				mesh.octree.push_back(child);
-				std::vector<std::vector<unsigned int> > grandchildrenTris(8);
-				for (int tri = 0; tri < trisCount; tri++) {
-					int triIndex = mesh.octreeTris[tri + trisStart];
-					if ((cpuOutput[tri] >> 8*childIndex) & 255) {
-						mesh.octreeTris.push_back(triIndex);
-						mesh.octree[mesh.octree.size() - 1].trisCount++;
-						for (int grandchild = 0; grandchild < 8; grandchild++) {
-							if ((cpuOutput[tri] >> 8 * childIndex + grandchild) & 1) {
-								grandchildrenTris[grandchild].push_back(triIndex);
-							}
-						}
-					}
-				}
 			}
 		}
 	}
-	delete[] cpuOutput;
 	for (int x = 0; x < 2; x++) {
 		for (int y = 0; y < 2; y++) {
 			for (int z = 0; z < 2; z++) {
@@ -276,7 +222,105 @@ void Subdivide(Mesh &mesh, int octreeIndex, int minTris, int depth, cl::Context 
 			}
 		}
 	}
-	for (int i = 0; i < 8; i++) {
-		Subdivide(mesh, mesh.octree[octreeIndex].children[i], maxTrisPerVertex, depth - 1, context, kernel, device);
+	return mesh.octree.size() - 1;
+}
+
+void Subdivide(Mesh &mesh, int octreeIndex, int minTris, int depth, cl::Context &context, cl::Kernel &kernel, cl::Device &device) {
+	if (depth <= 0 || mesh.octree[octreeIndex].trisCount <= minTris) return;
+	int trisStart = mesh.octree[octreeIndex].trisIndex;
+	int trisCount = mesh.octree[octreeIndex].trisCount;
+	std::map<int, int> trisPerVertex;
+	int maxTrisPerVertex = 0;
+	for (int tri = trisStart; tri < trisStart + trisCount; tri++) {
+		int triIndex = mesh.octreeTris[tri];
+		trisPerVertex[mesh.triangles[9 * triIndex + 3 * 0]]++;
+		trisPerVertex[mesh.triangles[9 * triIndex + 3 * 1]]++;
+		trisPerVertex[mesh.triangles[9 * triIndex + 3 * 2]]++;
+		maxTrisPerVertex = max(maxTrisPerVertex, trisPerVertex[mesh.triangles[9 * triIndex + 3 * 0]]);
+		maxTrisPerVertex = max(maxTrisPerVertex, trisPerVertex[mesh.triangles[9 * triIndex + 3 * 1]]);
+		maxTrisPerVertex = max(maxTrisPerVertex, trisPerVertex[mesh.triangles[9 * triIndex + 3 * 2]]);
 	}
+	if (mesh.octree[octreeIndex].trisCount <= maxTrisPerVertex) return;
+
+	int numTriangles = trisCount;
+	cl_ulong *cpuOutput = new cl_ulong[numTriangles];
+
+	cl::Buffer triIndexBuffer = cl::Buffer(context, CL_MEM_READ_ONLY | CL_MEM_COPY_HOST_PTR, trisCount * sizeof(cl_int), &mesh.octreeTris[trisStart]);
+	cl::Buffer clOutput = cl::Buffer(context, CL_MEM_WRITE_ONLY, numTriangles * sizeof(cl_ulong), NULL);
+
+	cl_float3 min = mesh.octree[octreeIndex].min;
+	cl_float3 max = mesh.octree[octreeIndex].max;
+	cl_float3 extents = max - min;
+	cl_float3 half_extents = extents / 2;
+	cl_float3 ex = float3(half_extents.x, 0, 0);
+	cl_float3 ey = float3(0, half_extents.y, 0);
+	cl_float3 ez = float3(0, 0, half_extents.z);
+
+	kernel.setArg(2, triIndexBuffer);
+	kernel.setArg(3, min);
+	kernel.setArg(4, max);
+	kernel.setArg(5, clOutput);
+	kernel.setArg(6, numTriangles);
+	cl::CommandQueue queue = cl::CommandQueue(context, device);
+
+	std::size_t global_work_size = numTriangles;
+	std::size_t local_work_size = kernel.getWorkGroupInfo<CL_KERNEL_WORK_GROUP_SIZE>(device);
+	if (global_work_size % local_work_size != 0)
+		global_work_size = (global_work_size / local_work_size + 1) * local_work_size;
+
+	queue.enqueueNDRangeKernel(kernel, NULL, global_work_size, local_work_size);
+
+	queue.enqueueReadBuffer(clOutput, CL_TRUE, 0, numTriangles * sizeof(cl_ulong), cpuOutput);
+
+	SplitChildren(mesh, octreeIndex);
+
+	for (int x = 0; x < 2; x++) {
+		for (int y = 0; y < 2; y++) {
+			for (int z = 0; z < 2; z++) {
+				Octree child;
+				int childIndex = z + 2 * y + 4 * x;
+				
+				child.trisIndex = mesh.octreeTris.size();
+				child.trisCount = 0;
+
+				std::vector<std::vector<unsigned int> > grandchildrenTris(8);
+				for (int tri = 0; tri < trisCount; tri++) {
+					int triIndex = mesh.octreeTris[tri + trisStart];
+					if ((cpuOutput[tri] >> 8 * childIndex) & 255) {
+						mesh.octreeTris.push_back(triIndex);
+						mesh.octree[mesh.octree[octreeIndex].children[childIndex]].trisCount++;
+						for (int grandchild = 0; grandchild < 8; grandchild++) {
+							if ((cpuOutput[tri] >> 8 * childIndex + grandchild) & 1) {
+								grandchildrenTris[grandchild].push_back(triIndex);
+							}
+						}
+					}
+				}
+				childIndex = mesh.octree[octreeIndex].children[childIndex];
+				bool didSplit = false;
+				for (int grandchild = 0; grandchild < 8; grandchild++) {
+					if (grandchildrenTris[grandchild].size() > maxTrisPerVertex) {
+						SplitChildren(mesh, childIndex);
+						didSplit = true;
+						break;
+					}
+				}
+				if (didSplit) {
+					for (int grandchild = 0; grandchild < 8; grandchild++) {
+						int grandChildIndex = mesh.octree[childIndex].children[grandchild];
+						if (grandchildrenTris[grandchild].size() > maxTrisPerVertex) {
+							mesh.octree[grandChildIndex].trisIndex = mesh.octreeTris.size();
+							mesh.octree[grandChildIndex].trisCount = 0;
+							for (int tri = 0; tri < grandchildrenTris[grandchild].size(); tri++) {
+								mesh.octreeTris.push_back(grandchildrenTris[grandchild][tri]);
+								mesh.octree[grandChildIndex].trisCount++;
+							}
+							Subdivide(mesh, grandChildIndex, maxTrisPerVertex, depth - 2, context, kernel, device);
+						}
+					}
+				}
+			}
+		}
+	}
+	delete[] cpuOutput;
 }

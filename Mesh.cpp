@@ -50,5 +50,5 @@ void Mesh::GenerateOctree(int firstTriIndex) {
 	kernel.setArg(0, vertBuffer);
 	kernel.setArg(1, triBuffer);
 
-	Subdivide(*this, octreeIndex, 0, 1, context, kernel, device);
+	Subdivide(*this, octreeIndex, 0, 10, context, kernel, device);
 }

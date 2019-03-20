@@ -1,5 +1,6 @@
 #define __CL_ENABLE_EXCEPTIONS
 #include <iostream>
+#include <ostream>
 #include <queue>
 
 #include "gl_interop.h"
@@ -13,10 +14,62 @@
 cl_float4* cpu_output;
 cl_int err;
 
+void json(Mesh const& mesh, const unsigned int octreeIndex, std::ostream &out, const unsigned int indent) {
+	out << "{" << std::endl;
+	out << std::string(indent + 1, '\t') << "\"bounds\": {" << std::endl;
+	out << std::string(indent + 2, '\t') << "\"min\": \"(" << mesh.octree[octreeIndex].min.x << ", "
+		<< mesh.octree[octreeIndex].min.y << ", " << mesh.octree[octreeIndex].min.z << ")\"," << std::endl;
+	out << std::string(indent + 2, '\t') << "\"max\": \"(" << mesh.octree[octreeIndex].max.x << ", "
+		<< mesh.octree[octreeIndex].max.y << ", " << mesh.octree[octreeIndex].max.z << ")\"" << std::endl;
+	out << std::string(indent + 1, '\t') << "}," << std::endl;
+	out << std::string(indent + 1, '\t') << "\"trisCount\": " << mesh.octree[octreeIndex].trisCount << "," << std::endl;
+	out << std::string(indent + 1, '\t') << "\"tris\": [";
+	std::string sep = "";
+	for (int i = 0; i < mesh.octree[octreeIndex].trisCount; i++) {
+		out << sep << mesh.octreeTris[mesh.octree[octreeIndex].trisIndex + i];
+		sep = ", ";
+	}
+	out << "]," << std::endl;
+	out << std::string(indent + 1, '\t') << "\"Mathematica\": \"Show[Graphics3D[{Opacity[0.5],Cuboid[{"
+		<< mesh.octree[octreeIndex].min.x << "," << mesh.octree[octreeIndex].min.y << "," << mesh.octree[octreeIndex].min.z << "},{"
+		<< mesh.octree[octreeIndex].max.x << "," << mesh.octree[octreeIndex].max.y << "," << mesh.octree[octreeIndex].max.z
+		<< "}]}],Graphics3D[Triangle[{";
+	sep = "";
+	for (int i = 0; i < mesh.octree[octreeIndex].trisCount; i++) {
+		int triIndex = mesh.octreeTris[mesh.octree[octreeIndex].trisIndex + i];
+		out << sep << "{{" << mesh.vertices[mesh.triangles[9 * triIndex + 3 * 0]].x
+			<< "," << mesh.vertices[mesh.triangles[9 * triIndex + 3 * 0]].y
+			<< "," << mesh.vertices[mesh.triangles[9 * triIndex + 3 * 0]].z << "},{"
+			<< mesh.vertices[mesh.triangles[9 * triIndex + 3 * 1]].x
+			<< "," << mesh.vertices[mesh.triangles[9 * triIndex + 3 * 1]].y
+			<< "," << mesh.vertices[mesh.triangles[9 * triIndex + 3 * 1]].z << "},{"
+			<< mesh.vertices[mesh.triangles[9 * triIndex + 3 * 2]].x
+			<< "," << mesh.vertices[mesh.triangles[9 * triIndex + 3 * 2]].y
+			<< "," << mesh.vertices[mesh.triangles[9 * triIndex + 3 * 2]].z << "}}";
+		sep = ",";
+	}
+	out << "}]]]\"," << std::endl;
+	out << std::string(indent + 1, '\t') << "\"children\": {";
+	if (mesh.octree[octreeIndex].children[0] != -1) {
+		sep = "";
+		for (int i = 0; i < 8; i++) {
+			out << sep << std::endl;
+			out << std::string(indent + 2, '\t') << "\"" << i << "\": ";
+			json(mesh, mesh.octree[octreeIndex].children[i], out, indent + 2);
+			sep = ",";
+		}
+		out << std::endl << std::string(indent + 1, '\t');
+	}
+	out << "}" << std::endl;
+	out << std::string(indent, '\t') << "}";
+}
+
 void main(int argc, char** argv) {
 
 	inputScene();
-
+	std::ofstream file("parallel.json");
+	json(theMesh, 0, file, 0);
+	file.close();
 	// initialise OpenGL (GLEW and GLUT window + callback functions)
 	initGL(argc, argv);
 	
