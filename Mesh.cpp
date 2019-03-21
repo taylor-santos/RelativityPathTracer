@@ -51,9 +51,12 @@ void Mesh::GenerateOctree(int firstTriIndex) {
 	kernel.setArg(0, vertBuffer);
 	kernel.setArg(1, triBuffer);
 
+	int depth = 1;
 	auto clock_start = std::chrono::high_resolution_clock::now();
-	Subdivide(*this, octreeIndex, 0, 5, context, kernel, device);
+	Subdivide(*this, octreeIndex, 0, depth, context, kernel, device);
 	auto clock_end = std::chrono::high_resolution_clock::now();
-	int ms = std::chrono::duration_cast<std::chrono::milliseconds>(clock_end - clock_start).count();
-	std::cout << "Octree generated in " << ms << "ms" << std::endl;
+	int us = std::chrono::duration_cast<std::chrono::microseconds>(clock_end - clock_start).count();
+	std::cout << "Octree generated in " << us << "us" << std::endl;
+	std::cout << "Octree has " << this->octree[octreeIndex].trisCount << " triangles" << std::endl;
+	std::cout << "Octree has " << this->octree.size() << " nodes" << std::endl;
 }

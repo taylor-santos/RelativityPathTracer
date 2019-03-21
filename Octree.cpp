@@ -1,7 +1,9 @@
+#define __CL_ENABLE_EXCEPTIONS
 #include "Octree.h"
 #include "Mesh.h"
 #include <map>
 #include <windows.h>
+#include <iostream>
 
 bool AABBTriangleIntersection(Mesh const& mesh, int octreeIndex, int triIndex) {
 	const cl_float3 A = mesh.vertices[mesh.triangles[9 * triIndex + 3 * 0]];
@@ -248,13 +250,9 @@ void Subdivide(Mesh &mesh, int octreeIndex, int minTris, int depth, cl::Context 
 	cl::Buffer triIndexBuffer = cl::Buffer(context, CL_MEM_READ_ONLY | CL_MEM_COPY_HOST_PTR, trisCount * sizeof(cl_int), &mesh.octreeTris[trisStart]);
 	cl::Buffer clOutput = cl::Buffer(context, CL_MEM_WRITE_ONLY, numTriangles * sizeof(cl_ulong), NULL);
 
+
 	cl_float3 min = mesh.octree[octreeIndex].min;
 	cl_float3 max = mesh.octree[octreeIndex].max;
-	cl_float3 extents = max - min;
-	cl_float3 half_extents = extents / 2;
-	cl_float3 ex = float3(half_extents.x, 0, 0);
-	cl_float3 ey = float3(0, half_extents.y, 0);
-	cl_float3 ez = float3(0, 0, half_extents.z);
 
 	kernel.setArg(2, triIndexBuffer);
 	kernel.setArg(3, min);
@@ -264,7 +262,14 @@ void Subdivide(Mesh &mesh, int octreeIndex, int minTris, int depth, cl::Context 
 	cl::CommandQueue queue = cl::CommandQueue(context, device);
 
 	std::size_t global_work_size = numTriangles;
-	std::size_t local_work_size = kernel.getWorkGroupInfo<CL_KERNEL_WORK_GROUP_SIZE>(device);
+	std::size_t local_work_size;
+	try {
+		local_work_size = kernel.getWorkGroupInfo<CL_KERNEL_WORK_GROUP_SIZE>(device);
+	}
+	catch (cl::Error &e) {
+		std::cerr << e.err() << std::endl;
+		throw e;
+	}
 	if (global_work_size % local_work_size != 0)
 		global_work_size = (global_work_size / local_work_size + 1) * local_work_size;
 
@@ -290,7 +295,7 @@ void Subdivide(Mesh &mesh, int octreeIndex, int minTris, int depth, cl::Context 
 						mesh.octreeTris.push_back(triIndex);
 						mesh.octree[mesh.octree[octreeIndex].children[childIndex]].trisCount++;
 						for (int grandchild = 0; grandchild < 8; grandchild++) {
-							if ((cpuOutput[tri] >> 8 * childIndex + grandchild) & 1) {
+							if ((cpuOutput[tri] >> (8 * childIndex + grandchild)) & 1) {
 								grandchildrenTris[grandchild].push_back(triIndex);
 							}
 						}

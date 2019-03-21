@@ -158,13 +158,46 @@ __kernel void parallel_add(__global float3* vertices, __global unsigned int* tri
 	const int i = get_global_id(0);
 	if (i >= num_triangles) return;
 	const int triIndex = 9*triIndices[i];
-	const float3 A = vertices[triangles[triIndex + 0]],
+	
+	const float3 
+		A = vertices[triangles[triIndex + 0]],
 		B = vertices[triangles[triIndex + 3]],
-		C = vertices[triangles[triIndex + 6]],
-		Center = (min + max) / 2,
-		Extent = (max - min) / 2,
-		extent = (max - min) / 4;
+		C = vertices[triangles[triIndex + 6]];
+	const float3 half_extents = (max - min) / 2;
+	
+	const float3
+		ex = (float3)(half_extents.x, 0, 0),
+		ey = (float3)(0, half_extents.y, 0),
+		ez = (float3)(0, 0, half_extents.z);
+	unsigned long ret = 0;
 
+	for (int x = 0; x < 2; x++) {
+		for (int y = 0; y < 2; y++) {
+			for (int z = 0; z < 2; z++) {
+				const int childIndex = z + 2 * y + 4 * x;
+				const float3 childmin = min + dot(half_extents, (float3)(x, y, z));
+				const float3 childmax = childmin + 2 * half_extents;
+				const float3 center = (childmin + childmax) / 2;
+				const float3 child_half_extents = (childmax - childmin) / 2;
+				
+				const float3
+					child_ex = (float3)(child_half_extents.x, 0, 0),
+					child_ey = (float3)(0, child_half_extents.y, 0),
+					child_ez = (float3)(0, 0, child_half_extents.z);
+				ret += ((
+					(AABBTriangleIntersection(A, B, C, childmin, center) * 1) +
+					(AABBTriangleIntersection(A, B, C, childmin + child_ez, center + child_ez) * 2) +
+					(AABBTriangleIntersection(A, B, C, childmin + child_ey, center + child_ey) * 4) +
+					(AABBTriangleIntersection(A, B, C, childmin + child_ey + child_ez, center + child_ey + child_ez) * 8) +
+					(AABBTriangleIntersection(A, B, C, childmin + child_ex, center + child_ex) * 16) +
+					(AABBTriangleIntersection(A, B, C, childmin + child_ex + child_ez, center + child_ex + child_ez) * 32) +
+					(AABBTriangleIntersection(A, B, C, childmin + child_ex + child_ey, center + child_ex + child_ey) * 64) +
+					(AABBTriangleIntersection(A, B, C, center, childmax) * 128)) << (8 * childIndex));
+			}
+		}
+	}
+	output[i] = ret;
+	/*
 	unsigned long o0 = 0,
 		o1 = 0,
 		o2 = 0,
@@ -263,4 +296,5 @@ __kernel void parallel_add(__global float3* vertices, __global unsigned int* tri
 		(AABBTriangleIntersection(A, B, C, center, half_max) * 128);
 
 	output[i] = o0 + 256 * (o1 + 256 * (o2 + 256 * (o3 + 256 * (o4 + 256 * (o5 + 256 * (o6 + 256 * o7))))));
+	*/
 }
